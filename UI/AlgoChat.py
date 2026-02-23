@@ -7,10 +7,8 @@ st.set_page_config(page_title="gradient color", layout="wide")
 st.markdown(
     """
     <style>
-    /* Reduce top padding so content sits closer to the top */
     .block-container { padding-top: 0.75rem; }
 
-    /* Full app background */
     .stApp {
         background: radial-gradient(circle at 20% 10%, #1d4ed8 0%, rgba(29, 78, 216, 0) 35%),
                     radial-gradient(circle at 80% 20%, #7c3aed 0%, rgba(124, 58, 237, 0) 40%),
@@ -18,7 +16,6 @@ st.markdown(
         color: #ffffff;
     }
 
-    /* Main content container styling for readability */
     section[data-testid="stMain"] > div {
         background: rgba(2, 6, 23, 0.55);
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -28,7 +25,6 @@ st.markdown(
         -webkit-backdrop-filter: blur(6px);
     }
 
-    /* Center the specific header + subtitle (and force white) */
     .top-center {
         text-align: center;
         color: #ffffff !important;
@@ -39,25 +35,58 @@ st.markdown(
 )
 
 # ----------------------------
-# Evolution demo (replace later)
+# Fitness definition
+# Fitness = w1*score + w2*survival_time - w3*cost(steps), s.t. w1+w2+w3=1
 # ----------------------------
-def evolve_stub(num_generations: int, initial_code: str):
+def compute_fitness(score: float, survival_time: float, steps: float, w1: float, w2: float, w3: float) -> float:
+    return (w1 * score) + (w2 * survival_time) - (w3 * steps)
+
+
+# ----------------------------
+# Evaluation stub (replace later with real Pacman evaluation)
+# Returns metrics used by the fitness function: score, survival_time, steps
+# ----------------------------
+def evaluate_candidate_stub(generation: int, num_generations: int):
     """
-    Replace with your real evolution loop.
-    Yields (generation_number, best_score_so_far, best_solution_so_far).
+    Replace with your real Pacman evaluation.
+    This stub simulates:
+      - score tends to improve over generations
+      - survival time tends to improve
+      - steps may decrease (cost)
     """
-    best = 0.0
+    progress = generation / max(1, num_generations)
+
+    score = random.randint(0, 500) + int(2000 * progress * random.random())
+    survival_time = random.uniform(5, 20) + (60 * progress * random.random())
+    steps = random.randint(150, 600) - int(80 * progress * random.random())  # cost decreases a bit
+
+    # steps shouldn't go below something reasonable
+    steps = max(20, steps)
+
+    return {"score": float(score), "survival_time": float(survival_time), "steps": float(steps)}
+
+
+# ----------------------------
+# Evolution loop (fitness-based)
+# Yields (generation, best_fitness, best_solution, best_metrics)
+# ----------------------------
+def evolve_stub(num_generations: int, initial_code: str, w1: float, w2: float, w3: float):
+    best_fitness = float("-inf")
     best_solution = initial_code
+    best_metrics = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
+
     for g in range(1, num_generations + 1):
         time.sleep(0.05)  # simulate work
 
-        # simulate score improving sometimes
-        candidate_score = random.random() * (g / num_generations)
-        if candidate_score >= best:
-            best = candidate_score
+        metrics = evaluate_candidate_stub(g, num_generations)
+        fitness = compute_fitness(metrics["score"], metrics["survival_time"], metrics["steps"], w1, w2, w3)
+
+        if fitness >= best_fitness:
+            best_fitness = fitness
+            best_metrics = metrics
             best_solution = initial_code + f"\n# improved at generation {g} (stub)\n"
 
-        yield g, best, best_solution
+        yield g, best_fitness, best_solution, best_metrics
 
 
 # Session defaults
@@ -79,10 +108,15 @@ if "stop_requested" not in st.session_state:
     st.session_state["stop_requested"] = False
 if "gen_done" not in st.session_state:
     st.session_state["gen_done"] = 0
-if "best_score" not in st.session_state:
-    st.session_state["best_score"] = 0.0
+
+# Fitness/Best tracking
+if "best_fitness" not in st.session_state:
+    st.session_state["best_fitness"] = float("-inf")
 if "best_solution" not in st.session_state:
-    st.session_state["best_solution"] = ""  # <- store final/best program/code here
+    st.session_state["best_solution"] = ""
+if "best_metrics" not in st.session_state:
+    st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
+
 
 with st.sidebar:
     st.subheader("API Setup (optional)")
@@ -113,6 +147,7 @@ with st.sidebar:
         if st.button("Clear key"):
             st.session_state["api_key"] = ""
 
+
 # Header
 st.markdown('<h1 class="top-center">Welcome to AlgoChat</h1>', unsafe_allow_html=True)
 st.markdown('<p class="top-center">CS5381 Algorithm Assistant</p>', unsafe_allow_html=True)
@@ -124,12 +159,13 @@ if key_in_use:
 else:
     st.info("No API key provided (optional). You can still use the app.")
 
+
 # Algorithm / Problem Description
 st.markdown("## Algorithm / Problem Description")
 st.session_state["problem_description"] = st.text_area(
     "Paste your algorithm description / pseudocode / code goal here:",
     height=220,
-    placeholder="Example: Evolve candidate programs; fitness = passed unit tests; selection = tournament; mutation = ...",
+    placeholder="Example: Evolve candidate programs; fitness = w1*score + w2*survival - w3*steps; selection = top-k; mutation = ...",
     value=st.session_state["problem_description"],
 )
 
@@ -137,6 +173,7 @@ desc_ok = bool(st.session_state["problem_description"].strip())
 if not desc_ok:
     st.info("Enter your Algorithm / Problem Description to continue.")
     st.stop()
+
 
 # Initial Code input
 st.markdown("## Initial Code (required)")
@@ -157,16 +194,33 @@ st.session_state["initial_code"] = st.text_area(
 
 code_ok = bool(st.session_state["initial_code"].strip())
 
+
+# Fitness weights (NEW)
+st.markdown("## Fitness Weights (must sum to 1)")
+w_col1, w_col2, w_col3 = st.columns(3)
+with w_col1:
+    w1 = st.slider("w₁ × score", 0.0, 1.0, 0.50, 0.05, disabled=st.session_state["evolution_running"])
+with w_col2:
+    w2 = st.slider("w₂ × survival time", 0.0, 1.0, 0.30, 0.05, disabled=st.session_state["evolution_running"])
+with w_col3:
+    w3 = st.slider("w₃ × steps (cost)", 0.0, 1.0, 0.20, 0.05, disabled=st.session_state["evolution_running"])
+
+w_sum = w1 + w2 + w3
+if abs(w_sum - 1.0) > 1e-6:
+    st.warning(f"Your weights sum to {w_sum:.2f}. Adjust sliders so ∑w = 1.00.")
+
+
 col1, col2 = st.columns(2)
 with col1:
     start_btn = st.button(
         "Start evolution / testing",
         type="primary",
-        disabled=not code_ok or st.session_state["evolution_running"],
+        disabled=(not code_ok) or st.session_state["evolution_running"] or (abs(w_sum - 1.0) > 1e-6),
     )
 with col2:
-    if st.button("Clear Initial Code"):
+    if st.button("Clear Initial Code", disabled=st.session_state["evolution_running"]):
         st.session_state["initial_code"] = ""
+
 
 with st.expander("Initial Code preview", expanded=False):
     st.code(st.session_state["initial_code"] or "(empty)", language=st.session_state["code_language"])
@@ -174,13 +228,14 @@ with st.expander("Initial Code preview", expanded=False):
 with st.expander("Preview", expanded=False):
     st.write(st.session_state["problem_description"] or "(empty)")
 
+
 # ----------------------------
 # Live Evolution Dashboard
 # ----------------------------
 st.markdown("## Evolution Status")
 
 target_generations = st.number_input(
-    "Number of generations to run",
+    "Number of generations to run (iterations)",
     min_value=1,
     max_value=2000,
     value=50,
@@ -199,10 +254,11 @@ def render_dashboard():
     else:
         dash_status.info(f"Status: **{status}**")
 
-    a, b, c = dash_metrics.columns(3)
+    a, b, c, d = dash_metrics.columns(4)
     a.metric("Generations performed", f"{st.session_state['gen_done']}")
-    b.metric("Best score", f"{st.session_state['best_score']:.6f}")
+    b.metric("Best fitness", f"{st.session_state['best_fitness']:.3f}" if st.session_state["best_fitness"] != float("-inf") else "—")
     c.metric("Target generations", f"{int(target_generations)}")
+    d.metric("Best score (raw)", f"{st.session_state['best_metrics']['score']:.0f}")
 
 render_dashboard()
 
@@ -217,8 +273,9 @@ if stop_btn:
 
 if reset_stats_btn:
     st.session_state["gen_done"] = 0
-    st.session_state["best_score"] = 0.0
+    st.session_state["best_fitness"] = float("-inf")
     st.session_state["best_solution"] = ""
+    st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     dash_progress.progress(0)
     render_dashboard()
 
@@ -226,18 +283,25 @@ if start_btn:
     st.session_state["evolution_running"] = True
     st.session_state["stop_requested"] = False
     st.session_state["gen_done"] = 0
-    st.session_state["best_score"] = 0.0
-    st.session_state["best_solution"] = st.session_state["initial_code"]  # start from initial
+    st.session_state["best_fitness"] = float("-inf")
+    st.session_state["best_solution"] = st.session_state["initial_code"]
+    st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     dash_progress.progress(0)
     render_dashboard()
 
-    for g, best, best_solution in evolve_stub(int(target_generations), st.session_state["initial_code"]):
+    for g, best_fit, best_solution, best_metrics in evolve_stub(
+        int(target_generations),
+        st.session_state["initial_code"],
+        w1, w2, w3,
+    ):
         if st.session_state["stop_requested"]:
             break
 
         st.session_state["gen_done"] = g
-        st.session_state["best_score"] = best
+        st.session_state["best_fitness"] = best_fit
         st.session_state["best_solution"] = best_solution
+        st.session_state["best_metrics"] = best_metrics
+
         dash_progress.progress(g / int(target_generations))
         render_dashboard()
 
@@ -250,12 +314,18 @@ if start_btn:
     else:
         st.warning("Evolution stopped early.")
 
+
 # ----------------------------
 # Show Best Solution (FINAL)
 # ----------------------------
 st.markdown("## Best Solution")
+
 if st.session_state["best_solution"].strip():
-    st.write(f"**Best Score:** `{st.session_state['best_score']:.6f}`")
+    bm = st.session_state["best_metrics"]
+    st.write(
+        f"**Best Fitness:** `{st.session_state['best_fitness']:.3f}`  \n"
+        f"**Raw Metrics:** score=`{bm['score']:.0f}`, survival_time=`{bm['survival_time']:.2f}`, steps=`{bm['steps']:.0f}`"
+    )
     st.code(st.session_state["best_solution"], language=st.session_state["code_language"])
 else:
     st.info("Run the evolution to generate and display the best solution.")
