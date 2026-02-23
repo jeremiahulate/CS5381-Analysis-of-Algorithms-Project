@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+cs5381_local_agent.egg-info/PKG-INFO
+cs5381_local_agent.egg-info/SOURCES.txt
+cs5381_local_agent.egg-info/dependency_links.txt
+cs5381_local_agent.egg-info/requires.txt
+cs5381_local_agent.egg-info/top_level.txt

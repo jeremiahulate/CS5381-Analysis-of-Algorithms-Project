@@ -1,0 +1,3 @@
+{"source": "demo", "chunk_id": 0, "text": "FAISS is a library for efficient similarity search."}
+{"source": "demo", "chunk_id": 1, "text": "Streamlit is used to build simple web apps in Python."}
+{"source": "demo", "chunk_id": 2, "text": "A vector database stores embeddings for retrieval."}
