@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -77,6 +78,33 @@ def run_backend_evolution(
     return result
 
 
+def history_to_dataframe(history):
+    rows = []
+    for item in history:
+        rows.append(
+            {
+                "generation": item.generation,
+                "best_generation_fitness": item.best_generation_fitness,
+                "best_so_far_fitness": item.best_so_far_fitness,
+                "best_score": item.best_score,
+                "best_survival_time": item.best_survival_time,
+                "best_steps": item.best_steps,
+                "mutation_mode": item.mutation_mode,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def save_history_csv(history_df: pd.DataFrame) -> str:
+    output_dir = ROOT / "Data" / "evolution_runs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = output_dir / f"evolution_history_{timestamp}.csv"
+    history_df.to_csv(file_path, index=False)
+    return str(file_path)
+
+
 # Session defaults
 if "api_key" not in st.session_state:
     st.session_state["api_key"] = ""
@@ -90,6 +118,8 @@ if "code_language" not in st.session_state:
     st.session_state["code_language"] = "python"
 if "history" not in st.session_state:
     st.session_state["history"] = []
+if "last_csv_path" not in st.session_state:
+    st.session_state["last_csv_path"] = ""
 
 # Evolution state
 if "evolution_running" not in st.session_state:
@@ -153,9 +183,6 @@ st.session_state["problem_description"] = st.text_area(
 )
 
 desc_ok = bool(st.session_state["problem_description"].strip())
-if not desc_ok:
-    st.info("Enter your Algorithm / Problem Description to continue.")
-    st.stop()
 
 st.markdown("## Initial Code (required)")
 st.session_state["code_language"] = st.selectbox(
@@ -201,17 +228,21 @@ with col1:
     start_btn = st.button(
         "Start evolution / testing",
         type="primary",
-        disabled=(not code_ok) or st.session_state["evolution_running"] or (abs(w_sum - 1.0) > 1e-6),
+        disabled=(not code_ok) or (not desc_ok) or st.session_state["evolution_running"] or (abs(w_sum - 1.0) > 1e-6),
     )
 with col2:
     if st.button("Clear Initial Code", disabled=st.session_state["evolution_running"]):
         st.session_state["initial_code"] = ""
 
-with st.expander("Initial Code preview", expanded=False):
-    st.code(st.session_state["initial_code"] or "(empty)", language=st.session_state["code_language"])
 
 with st.expander("Preview", expanded=False):
     st.write(st.session_state["problem_description"] or "(empty)")
+
+with st.expander("Initial Code preview", expanded=False):
+    st.code(st.session_state["initial_code"] or "(empty)", language=st.session_state["code_language"])
+
+if not desc_ok or not code_ok:
+    st.info("Enter both Algorithm / Problem Description and Initial Code to start evolution.")
 
 st.markdown("## Evolution Status")
 
@@ -258,6 +289,7 @@ if reset_stats_btn:
     st.session_state["best_solution"] = ""
     st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     st.session_state["history"] = []
+    st.session_state["last_csv_path"] = ""
     dash_progress.progress(0)
     render_dashboard()
 
@@ -269,6 +301,7 @@ if start_btn:
     st.session_state["best_solution"] = st.session_state["initial_code"]
     st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     st.session_state["history"] = []
+    st.session_state["last_csv_path"] = ""
     dash_progress.progress(0)
     render_dashboard()
 
@@ -301,6 +334,11 @@ if start_btn:
     st.session_state["evolution_running"] = False
     st.session_state["stop_requested"] = False
     st.session_state["history"] = result.history
+
+    history_df = history_to_dataframe(result.history)
+    if not history_df.empty:
+        st.session_state["last_csv_path"] = save_history_csv(history_df)
+
     render_dashboard()
 
     if st.session_state["gen_done"] >= int(target_generations):
@@ -309,6 +347,23 @@ if start_btn:
         st.warning("Evolution stopped early.")
 
 st.markdown("## Fitness Across Generations")
+
+history_df = history_to_dataframe(st.session_state["history"])
+if not history_df.empty:
+    st.line_chart(
+        history_df.set_index("generation")[["best_generation_fitness", "best_so_far_fitness"]]
+    )
+
+    csv_bytes = history_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download evolution history CSV",
+        data=csv_bytes,
+        file_name="student_name_data.csv",
+        mime="text/csv",
+    )
+
+    if st.session_state["last_csv_path"]:
+        st.caption(f"Saved run CSV: {st.session_state['last_csv_path']}")
 
 
 if st.session_state["best_solution"].strip():
