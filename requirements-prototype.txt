@@ -1,0 +1,7 @@
+streamlit
+pandas
+numpy
+sentence-transformers
+faiss-cpu
+# Optional if you want real API-backed LLM mutation instead of offline heuristic fallback
+openai
