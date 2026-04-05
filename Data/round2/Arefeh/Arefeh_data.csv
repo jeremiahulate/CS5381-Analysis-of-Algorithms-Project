@@ -1,2 +1,0 @@
-generation,best_fitness,score,survival_time,steps,weights_w1,weights_w2,weights_w3,runtime_seconds,notes
-10,884.688,1838,44.29,238,0.5,0.3,0.2,1.50,Best summary shown after evolution finished; per-generation log/plot not displayed in UI
