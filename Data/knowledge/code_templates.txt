@@ -1,0 +1,37 @@
+Pacman code templates and snippets:
+
+Template 1: simple agent structure
+```
+def pacman_agent(state):
+    if state.ghosts_nearby():
+        return "run_away"
+    elif state.has_food_nearby():
+        return "eat_food"
+    else:
+        return "move_randomly"
+```
+
+Template 2: weighted decision logic
+```
+def pacman_agent(state):
+    if state.ghosts_nearby() and state.ghost_distance() < 3:
+        return "run_away"
+    if state.food_distance() < 5:
+        return "eat_food"
+    return "move_randomly"
+```
+
+Template 3: heuristic adjustment
+```
+def pacman_agent(state):
+    score = state.food_value() - 2 * state.ghost_value()
+    if score > 0:
+        return "eat_food"
+    return "run_away"
+```
+
+Mutation-friendly snippet ideas:
+- swap two lines within the decision section
+- change one condition to a stronger or weaker threshold
+- adjust heuristic weight by changing multipliers
+- change a return action from move_randomly to eat_food

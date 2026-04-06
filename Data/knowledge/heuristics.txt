@@ -1,0 +1,20 @@
+Heuristic functions and search guidance:
+
+- use distance to nearest food as a heuristic value
+- use distance to nearest ghost to penalize risk
+- combine food and ghost heuristics with weights
+- lower heuristic cost means a better move
+- adjust heuristic weights to prefer safety or speed
+- change condition thresholds based on ghost distance
+
+Search algorithms and heuristics:
+- DFS: deep exploration, may miss safe food
+- BFS: finds shortest path, useful for early food
+- A*: uses a heuristic plus path cost to find efficient routes
+- heuristics should guide toward food while avoiding ghosts
+- common heuristics: Manhattan distance, Manhattan(food, current), ghost distance
+
+Heuristic examples:
+- score_value = food_distance * 1.0 - ghost_distance * 2.0
+- if ghost_distance < 3 then avoid ghosts first
+- if food_distance is low then eat food now
