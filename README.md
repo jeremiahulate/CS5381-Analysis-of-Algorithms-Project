@@ -100,6 +100,7 @@ See:
 
 ### Project Structure
 
+```text
 src/
 ├── evolve/
 │   ├── engine.py        # Evolution loop
@@ -121,7 +122,7 @@ Data/
 
 Tests/
 └── test_*.py            # Unit tests
-
+```
 ---
 
 ### How to Run
