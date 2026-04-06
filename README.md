@@ -114,8 +114,13 @@ src/
 ├── vectordb/
 │   └── faiss_store.py   # FAISS interface
 
+Scripts/
+├── build_faiss_index.py  # Builds index
+├── query_faiss_index.py  # Queries index
+└── run_prototype_check.py # Runs LLM Prototyep
+
 UI/
-└── streamlit_app.py     # Frontend UI
+└── UI.py     # Frontend UI
 
 Data/
 └── indexes/             # FAISS index storage
