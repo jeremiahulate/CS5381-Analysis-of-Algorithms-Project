@@ -1,0 +1,24 @@
+Pacman strategies and game-playing behavior:
+
+- chase food when the path is safe
+- avoid ghosts first, then seek food
+- move toward the nearest food pellet
+- use safe exploration if no immediate food is nearby
+- follow a path that balances survival and score
+- prefer ghost-free corridors when possible
+- use conditional logic for ghost distance and food distance
+- prefer longer survival over risky food hunting when ghosts are close
+
+Example strategy:
+if ghost nearby:
+    return "run_away"
+elif food nearby:
+    return "eat_food"
+else:
+    return "move_randomly"
+
+General game-playing styles:
+- reactive: respond to current state only
+- cautious: avoid danger first
+- greedy: prioritize immediate food
+- heuristic-driven: use distance estimates and weights
