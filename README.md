@@ -140,15 +140,15 @@ Tests/
 3. Create virtual environment:
 
 ```text
-- python -m venv .venv
-- .\.venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
 4. Install Dependencies:
 
 ```text
-- pip install -r requirements-prototype.txt
-- pip install -e .
+pip install -r requirements-prototype.txt
+pip install -e .
 ```
 
 The dependencies include:
@@ -161,14 +161,14 @@ The dependencies include:
 5. Run the UI:
 
 ```text
-- streamlit run UI/streamlit_app.py
+streamlit run UI/UI.py
 ```
 
 ## Running Prototype Scripts
 
 You can test the evolution system directly with:
 ```text
-- python Scripts/run_prototype_check.py
+python Scripts/run_prototype_check.py
 ```
 
 This will run:
