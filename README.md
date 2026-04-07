@@ -139,13 +139,18 @@ Tests/
 
 3. Create virtual environment:
 
+```text
 - python -m venv .venv
 - .\.venv\Scripts\Activate.ps1
+```
 
 4. Install Dependencies:
 
+```text
 - pip install -r requirements-prototype.txt
 - pip install -e .
+```
+
 The dependencies include:
 
 - Streamlit
@@ -155,12 +160,16 @@ The dependencies include:
 
 5. Run the UI:
 
+```text
 - streamlit run UI/streamlit_app.py
+```
 
 ## Running Prototype Scripts
 
 You can test the evolution system directly with:
+```text
 - python Scripts/run_prototype_check.py
+```
 
 This will run:
 
@@ -211,7 +220,7 @@ These modes allow comparison of:
 
 ### References
 
-AlphaEvolve (Google Research)
-Evolutionary Algorithms
-Sentence Transformers (SBERT)
-FAISS (Facebook AI Similarity Search)
+- AlphaEvolve (Google Research)
+- Evolutionary Algorithms
+- Sentence Transformers (SBERT)
+- FAISS (Facebook AI Similarity Search)
