@@ -42,6 +42,7 @@ LLMSettings(provider="heuristic")
 - API mutation uses OpenAI-compatible endpoints when configured
 
 See: src/evolve/generator.py
+
 This includes:
 - HeursticLLMMutator (offline fallback)
 - OpenAiCompatibleMutator (API-based)
