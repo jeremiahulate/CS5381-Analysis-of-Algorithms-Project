@@ -137,7 +137,6 @@ Tests/
 
 ```text
 git clone https://github.com/jeremiahulate/CS5381-Analysis-of-Algorithms-Project.git
-cd CS5381-Analysis-of-Algorithms-Project
 ```
 
 3. Create virtual environment:
