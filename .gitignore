@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 Data/evolution_runs/
+Models/
+*.gguf
+*.exe
+*.dll
