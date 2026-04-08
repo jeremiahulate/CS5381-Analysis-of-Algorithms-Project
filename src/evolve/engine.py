@@ -7,6 +7,7 @@ from typing import List, Literal
 
 from src.evolve.evaluator import CandidateProgram, Evaluator
 from src.evolve.fitness import FitnessWeights, FitnessResult, compute_fitness
+from src.evolve.generator import LLMSettings, LLMMutator
 
 
 MutationMode = Literal["none", "random", "llm"]
@@ -30,6 +31,8 @@ class GenerationSummary:
     best_steps: float
     best_code: str
     mutation_mode: str
+    operation_summary: str = ""
+    provider: str = ""
 
 
 @dataclass(frozen=True)
@@ -39,14 +42,12 @@ class EvolutionRunResult:
 
 
 def is_valid_python(code: str) -> bool:
-    """
-    Check whether mutated Python code is syntactically valid.
-    """
     try:
         ast.parse(code)
         return True
     except SyntaxError:
         return False
+
 
 
 def mutate_add_comment(code: str, rng: random.Random) -> str:
@@ -57,6 +58,7 @@ def mutate_add_comment(code: str, rng: random.Random) -> str:
         "# random mutation",
     ]
     return code.rstrip() + "\n" + rng.choice(comments)
+
 
 
 def mutate_replace_literal(code: str, rng: random.Random) -> str:
@@ -77,6 +79,7 @@ def mutate_replace_literal(code: str, rng: random.Random) -> str:
     return code.replace(old, new, 1)
 
 
+
 def mutate_insert_line(code: str, rng: random.Random) -> str:
     lines = code.splitlines()
     insertions = [
@@ -92,36 +95,29 @@ def mutate_insert_line(code: str, rng: random.Random) -> str:
     return "\n".join(lines)
 
 
-def random_mutation(code: str, rng: random.Random, language: str = "python") -> str:
-    """
-    Safer mutation strategy than swapping arbitrary lines.
 
-    For Python:
-    - add a comment
-    - replace known literals/tokens
-    - insert a safe line
-    - validate syntax; if invalid, fall back
-    """
+def random_mutation(code: str, rng: random.Random, language: str = "python") -> tuple[str, str]:
     mutation_functions = [
-        mutate_add_comment,
-        mutate_replace_literal,
-        mutate_insert_line,
+        (mutate_add_comment, "Added a safe comment mutation"),
+        (mutate_replace_literal, "Replaced one known strategy token/literal"),
+        (mutate_insert_line, "Inserted a safe line"),
     ]
 
     original = code
     attempts = 5
 
     for _ in range(attempts):
-        mutator = rng.choice(mutation_functions)
+        mutator, summary = rng.choice(mutation_functions)
         mutated = mutator(original, rng)
 
         if language.lower() == "python":
             if is_valid_python(mutated):
-                return mutated
+                return mutated, summary
         else:
-            return mutated
+            return mutated, summary
 
-    return mutate_add_comment(original, rng)
+    return mutate_add_comment(original, rng), "Applied fallback comment mutation"
+
 
 
 def generate_candidates(
@@ -129,27 +125,38 @@ def generate_candidates(
     population_size: int,
     mutation_mode: MutationMode,
     rng: random.Random,
-) -> List[CandidateProgram]:
-    """
-    Generate a new population from parent candidates.
-    """
+    problem_description: str = "",
+    llm_settings: LLMSettings | None = None,
+) -> tuple[List[CandidateProgram], List[str]]:
     if not parents:
         raise ValueError("At least one parent candidate is required.")
 
+    llm_mutator = LLMMutator(llm_settings or LLMSettings())
     candidates: List[CandidateProgram] = []
+    operation_summaries: List[str] = []
+    operation_providers: List[str] = []
 
     for _ in range(population_size):
         parent = rng.choice(parents)
 
         if mutation_mode == "none":
             new_code = parent.code
+            summary = "No mutation applied; reused parent candidate"
+            provider = "non"
 
         elif mutation_mode == "random":
-            new_code = random_mutation(parent.code, rng, parent.language)
+            new_code, summary = random_mutation(parent.code, rng, parent.language)
+            provider = "random"
 
         elif mutation_mode == "llm":
-            # Placeholder for future teammate integration
-            new_code = parent.code.rstrip() + "\n# llm mutation placeholder"
+            mutation_output = llm_mutator.mutate(
+                code=parent.code,
+                problem_description=problem_description,
+                language=parent.language,
+            )
+            new_code = mutation_output.code
+            summary = mutation_output.summary
+            provider = mutation_output.provider
 
         else:
             raise ValueError(f"Unsupported mutation mode: {mutation_mode}")
@@ -158,11 +165,15 @@ def generate_candidates(
             CandidateProgram(
                 code=new_code,
                 language=parent.language,
-                description=f"Generated via {mutation_mode} mutation",
+                description=summary,
+                provider=provider,
             )
         )
+        operation_summaries.append(summary)
+        operation_providers.append(provider)
 
-    return candidates
+    return candidates, operation_summaries, operation_providers
+
 
 
 def evaluate_population(
@@ -190,6 +201,7 @@ def evaluate_population(
     return evaluated
 
 
+
 def select_top_k(
     evaluated_candidates: List[EvaluatedCandidate],
     k: int,
@@ -206,6 +218,7 @@ def select_top_k(
     return ranked[:k]
 
 
+
 def run_evolution(
     initial_code: str,
     evaluator: Evaluator,
@@ -216,10 +229,9 @@ def run_evolution(
     mutation_mode: MutationMode = "random",
     language: str = "python",
     seed: int | None = None,
+    problem_description: str = "",
+    llm_settings: LLMSettings | None = None,
 ) -> EvolutionRunResult:
-    """
-    Run the evolutionary process for the requested number of generations.
-    """
     if generations < 1:
         raise ValueError("generations must be at least 1")
     if population_size < 1:
@@ -242,11 +254,13 @@ def run_evolution(
     best_overall: EvaluatedCandidate | None = None
 
     for generation in range(1, generations + 1):
-        candidates = generate_candidates(
+        candidates, operation_summaries, operation_providers = generate_candidates(
             parents=parents,
             population_size=population_size,
             mutation_mode=mutation_mode,
             rng=rng,
+            problem_description=problem_description,
+            llm_settings=llm_settings,
         )
 
         evaluated = evaluate_population(
@@ -258,33 +272,29 @@ def run_evolution(
         )
 
         selected = select_top_k(evaluated, selection_k)
-        best_this_generation = selected[0]
-
         parents = [item.candidate for item in selected]
 
-        if (
-            best_overall is None
-            or best_this_generation.fitness_result.fitness > best_overall.fitness_result.fitness
-        ):
-            best_overall = best_this_generation
+        best_generation = selected[0]
+
+        if best_overall is None or best_generation.fitness_result.fitness > best_overall.fitness_result.fitness:
+            best_overall = best_generation
 
         history.append(
             GenerationSummary(
                 generation=generation,
-                best_generation_fitness=best_this_generation.fitness_result.fitness,
+                best_generation_fitness=best_generation.fitness_result.fitness,
                 best_so_far_fitness=best_overall.fitness_result.fitness,
-                best_score=best_this_generation.fitness_result.raw_metrics.score,
-                best_survival_time=best_this_generation.fitness_result.raw_metrics.survival_time,
-                best_steps=best_this_generation.fitness_result.raw_metrics.steps,
-                best_code=best_this_generation.candidate.code,
+                best_score=best_generation.fitness_result.raw_metrics.score,
+                best_survival_time=best_generation.fitness_result.raw_metrics.survival_time,
+                best_steps=best_generation.fitness_result.raw_metrics.steps,
+                best_code=best_overall.candidate.code,
                 mutation_mode=mutation_mode,
+                operation_summary=best_generation.candidate.description or operation_summaries[0],
+                provider=best_generation.candidate.provider,
             )
         )
 
     if best_overall is None:
-        raise RuntimeError("Evolution run produced no evaluated candidates.")
+        raise RuntimeError("Evolution run did not produce any candidates.")
 
-    return EvolutionRunResult(
-        history=history,
-        best_overall=best_overall,
-    )
+    return EvolutionRunResult(history=history, best_overall=best_overall)

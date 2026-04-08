@@ -15,6 +15,7 @@ class CandidateProgram:
     code: str
     language: str = "python"
     description: str = ""
+    provider: str = ""
 
 
 class Evaluator(Protocol):
