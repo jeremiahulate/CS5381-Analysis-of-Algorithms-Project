@@ -216,8 +216,11 @@ Final structure:
 Models/
 └── llama/
 ├── llama-server.exe
-└── models/
-└── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+├── llama-cli.exe
+├── ggml-cpu-haswell.dll
+└── ...
+    └── models/
+        └── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
 ```
 ---
 
