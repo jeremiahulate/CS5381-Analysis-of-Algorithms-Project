@@ -117,7 +117,7 @@ Files:
 ---
 
 ## 📂 Project Structure
-
+```text
 src/
 ├── evolve/
 │   ├── engine.py
@@ -144,42 +144,45 @@ Data/
 
 Tests/
 └── test_*.py
-
+```
 ---
 
 ## ▶️ How to Run
 
 ### 1. Clone Repo
+```text
 git clone https://github.com/jeremiahulate/CS5381-Analysis-of-Algorithms-Project.git
-
+```
 ### 2. Setup Environment
+```text
 python -m venv .venv  
 .\.venv\Scripts\Activate.ps1
-
+```
 ### 3. Install Dependencies
+```text
 pip install -r requirements-prototype.txt  
 pip install -e .
-
+```
 ---
 
 ## 🔥 Run Local LLM (IMPORTANT)
 
 Start the llama server:
-
+```text
 .\Models\llama\llama-server.exe ^
   -m .\Models\llama\models\tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf ^
   --host 127.0.0.1 ^
   --port 8080
-
+```
 You should see:
 server is listening on http://127.0.0.1:8080
 
 ---
 
 ## ▶️ Run UI
-
+```text
 streamlit run UI/UI.py
-
+```
 ---
 
 ## 🧪 Experiment Modes
