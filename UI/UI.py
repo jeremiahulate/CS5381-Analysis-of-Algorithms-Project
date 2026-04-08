@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from src.evolve.engine import run_evolution
 from src.evolve.evaluator import DeterministicStubPacmanEvaluator
 from src.evolve.fitness import FitnessWeights
-
+from src.evolve.generator import LLMSettings
 
 st.set_page_config(page_title="gradient color", layout="wide")
 
@@ -54,6 +54,9 @@ def run_backend_evolution(
     w2: float,
     w3: float,
     mutation_mode: str,
+    problem_description: str,
+    api_provider: str,
+    api_key: str,
 ):
     evaluator = DeterministicStubPacmanEvaluator()
 
@@ -63,16 +66,33 @@ def run_backend_evolution(
         w_steps=w3,
     )
 
+    provider_map = {
+        "Heuristic": "heuristic",
+        "OpenAI API": "openai",
+        "Llama (local)": "llama",
+    }
+
+    llm_settings = LLMSettings(
+        provider=provider_map.get(api_provider, "heuristic"),
+        api_key=api_key.strip() or None,
+    )
+    print(
+        f"[UI DEBUG] api_provider={api_provider}, "
+        f"mapped_provider={llm_settings.provider}, "
+        f"api_key_present={bool(llm_settings.api_key)}"
+    )
     result = run_evolution(
         initial_code=initial_code,
         evaluator=evaluator,
         weights=weights,
         generations=generations,
-        population_size=4,
-        selection_k=2,
+        population_size=1,
+        selection_k=1,
         mutation_mode=mutation_mode,
         language=language,
         seed=42,
+        problem_description=problem_description,
+        llm_settings=llm_settings,
     )
 
     return result
@@ -90,17 +110,19 @@ def history_to_dataframe(history):
                 "best_survival_time": item.best_survival_time,
                 "best_steps": item.best_steps,
                 "mutation_mode": item.mutation_mode,
+                "provider": item.provider,
             }
         )
     return pd.DataFrame(rows)
 
 
-def save_history_csv(history_df: pd.DataFrame) -> str:
+
+def save_history_csv(history_df: pd.DataFrame, student_name: str) -> str:
     output_dir = ROOT / "Data" / "evolution_runs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = output_dir / f"evolution_history_{timestamp}.csv"
+    file_path = output_dir / f"{student_name}.csv"
     history_df.to_csv(file_path, index=False)
     return str(file_path)
 
@@ -109,7 +131,7 @@ def save_history_csv(history_df: pd.DataFrame) -> str:
 if "api_key" not in st.session_state:
     st.session_state["api_key"] = ""
 if "api_provider" not in st.session_state:
-    st.session_state["api_provider"] = "Custom"
+    st.session_state["api_provider"] = "Heuristic (Offline)"
 if "problem_description" not in st.session_state:
     st.session_state["problem_description"] = ""
 if "initial_code" not in st.session_state:
@@ -143,16 +165,16 @@ with st.sidebar:
 
     st.session_state["api_provider"] = st.selectbox(
         "Provider",
-        ["Custom", "Provider A", "Provider B"],
-        index=["Custom", "Provider A", "Provider B"].index(st.session_state["api_provider"])
-        if st.session_state["api_provider"] in ["Custom", "Provider A", "Provider B"]
+        ["Heuristic (Offline)", "OpenAI API", "Llama (local)"],
+        index=["Heuristic (Offline)", "OpenAI API", "Llama (local)"].index(st.session_state["api_provider"])
+        if st.session_state["api_provider"] in ["Heuristic (Offline)", "OpenAI API", "Llama (local)"]
         else 0,
     )
 
     api_key_input = st.text_input(
         "API key (optional)",
         type="password",
-        placeholder="paste-your-api-key-here",
+        placeholder="Enter your API key here",
         value=st.session_state["api_key"],
     )
 
@@ -168,13 +190,19 @@ with st.sidebar:
 
 st.markdown('<h1 class="top-center">Welcome to AlgoChat</h1>', unsafe_allow_html=True)
 st.markdown('<p class="top-center">CS5381 Algorithm Assistant</p>', unsafe_allow_html=True)
+st.markdown("### Enter your name with underscores(for saving results)")
+st.caption("This will be used to save your CSV file")
+student_name = st.text_input(
+    "Student Name",
+    placeholder="e.g. Jeremiah_Ulate"
+)
 
 if st.session_state["api_key"]:
     st.success("API key saved for this session.")
 else:
     st.info("No API key provided (optional). You can still use the app.")
 
-st.markdown("## Algorithm / Problem Description")
+st.markdown("## Algorithm / Problem Description (optional)")
 st.session_state["problem_description"] = st.text_area(
     "Paste your algorithm description / pseudocode / code goal here:",
     height=220,
@@ -228,7 +256,7 @@ with col1:
     start_btn = st.button(
         "Start evolution / testing",
         type="primary",
-        disabled=(not code_ok) or (not desc_ok) or st.session_state["evolution_running"] or (abs(w_sum - 1.0) > 1e-6),
+        disabled=(not code_ok) or st.session_state["evolution_running"] or (abs(w_sum - 1.0) > 1e-6),
     )
 with col2:
     if st.button("Clear Initial Code", disabled=st.session_state["evolution_running"]):
@@ -241,8 +269,10 @@ with st.expander("Preview", expanded=False):
 with st.expander("Initial Code preview", expanded=False):
     st.code(st.session_state["initial_code"] or "(empty)", language=st.session_state["code_language"])
 
-if not desc_ok or not code_ok:
-    st.info("Enter both Algorithm / Problem Description and Initial Code to start evolution.")
+if not code_ok:
+    st.info("Enter Initial Code to start evolution.")
+elif not desc_ok:
+    st.info("No algorithm description provided. Running with code only.")
 
 st.markdown("## Evolution Status")
 
@@ -313,6 +343,12 @@ if start_btn:
         w2=w2,
         w3=w3,
         mutation_mode=mutation_mode,
+        problem_description=(
+    st.session_state["problem_description"].strip()
+    or "Improve the given code conservatively."
+),
+        api_provider=st.session_state["api_provider"],
+        api_key=st.session_state["api_key"],
     )
 
     for item in result.history:
@@ -337,7 +373,7 @@ if start_btn:
 
     history_df = history_to_dataframe(result.history)
     if not history_df.empty:
-        st.session_state["last_csv_path"] = save_history_csv(history_df)
+        st.session_state["last_csv_path"] = save_history_csv(history_df,student_name)
 
     render_dashboard()
 
@@ -358,13 +394,23 @@ if not history_df.empty:
     st.download_button(
         "Download evolution history CSV",
         data=csv_bytes,
-        file_name="student_name_data.csv",
+        file_name=f"{student_name}_data.csv",
         mime="text/csv",
     )
 
     if st.session_state["last_csv_path"]:
         st.caption(f"Saved run CSV: {st.session_state['last_csv_path']}")
 
+st.markdown("## Evolution Details")
+if st.session_state["history"]:
+    for item in st.session_state["history"][-10:]:
+        with st.expander(f"Generation {item.generation}"):
+            st.write(f"**Mutation Mode:** {item.mutation_mode}")
+            st.write(f"**Provider:** {item.provider}")
+            st.write(f"**Operation Summary:**")
+            st.write(item.operation_summary or "No summary available.")
+            st.write("**Best Code at this Generation:**")
+            st.code(item.best_code, language=st.session_state["code_language"])
 
 if st.session_state["best_solution"].strip():
     bm = st.session_state["best_metrics"] 

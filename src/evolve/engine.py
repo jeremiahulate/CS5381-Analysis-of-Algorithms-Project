@@ -32,6 +32,7 @@ class GenerationSummary:
     best_code: str
     mutation_mode: str
     operation_summary: str = ""
+    provider: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ def generate_candidates(
     llm_mutator = LLMMutator(llm_settings or LLMSettings())
     candidates: List[CandidateProgram] = []
     operation_summaries: List[str] = []
+    operation_providers: List[str] = []
 
     for _ in range(population_size):
         parent = rng.choice(parents)
@@ -140,9 +142,11 @@ def generate_candidates(
         if mutation_mode == "none":
             new_code = parent.code
             summary = "No mutation applied; reused parent candidate"
+            provider = "non"
 
         elif mutation_mode == "random":
             new_code, summary = random_mutation(parent.code, rng, parent.language)
+            provider = "random"
 
         elif mutation_mode == "llm":
             mutation_output = llm_mutator.mutate(
@@ -152,6 +156,7 @@ def generate_candidates(
             )
             new_code = mutation_output.code
             summary = mutation_output.summary
+            provider = mutation_output.provider
 
         else:
             raise ValueError(f"Unsupported mutation mode: {mutation_mode}")
@@ -161,11 +166,13 @@ def generate_candidates(
                 code=new_code,
                 language=parent.language,
                 description=summary,
+                provider=provider,
             )
         )
         operation_summaries.append(summary)
+        operation_providers.append(provider)
 
-    return candidates, operation_summaries
+    return candidates, operation_summaries, operation_providers
 
 
 
@@ -247,7 +254,7 @@ def run_evolution(
     best_overall: EvaluatedCandidate | None = None
 
     for generation in range(1, generations + 1):
-        candidates, operation_summaries = generate_candidates(
+        candidates, operation_summaries, operation_providers = generate_candidates(
             parents=parents,
             population_size=population_size,
             mutation_mode=mutation_mode,
@@ -283,6 +290,7 @@ def run_evolution(
                 best_code=best_overall.candidate.code,
                 mutation_mode=mutation_mode,
                 operation_summary=best_generation.candidate.description or operation_summaries[0],
+                provider=best_generation.candidate.provider,
             )
         )
 

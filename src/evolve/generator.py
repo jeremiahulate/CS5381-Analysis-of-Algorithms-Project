@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import urllib.request
+import urllib.error
 import ast
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,112 @@ def is_valid_python(code: str) -> bool:
     except SyntaxError:
         return False
 
+def is_valid_pacman_agent(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+
+    funcs = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if len(funcs) != 1:
+        return False
+
+    func = funcs[0]
+    if func.name != "pacman_agent":
+        return False
+
+    if len(func.args.args) != 1:
+        return False
+
+    return func.args.args[0].arg == "state"
+
+def has_valid_pacman_actions(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    allowed_actions = {
+        "run_away",
+        "eat_food",
+        "wait",
+    }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return):
+            value = node.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                if value.value not in allowed_actions:
+                    return False
+
+    return True
+
+def extract_llama_code(output: str, original_code: str) -> str:
+    text = output.strip()
+
+    if not text:
+        return original_code
+
+    lines = text.splitlines()
+    filtered = []
+
+    skip_starts = (
+        "Loading model",
+        "build      :",
+        "model      :",
+        "modalities :",
+        "available commands:",
+        "/exit",
+        "/regen",
+        "/clear",
+        "/read",
+        "/glob",
+        "> [INST]",
+        "[/INST]",
+        "Exiting...",
+        "[LLM",
+        "load_backend:",
+        "[ Prompt:",
+    )
+
+    for line in lines:
+        s = line.strip()
+
+        if not s:
+            continue
+
+        if s.startswith(skip_starts):
+            continue
+
+        # skip banner / block characters
+        if any(ch in s for ch in ("▄▄", "██", "▀▀")):
+            continue
+
+        filtered.append(line)
+
+    text = "\n".join(filtered).strip()
+
+    if not text:
+        return original_code
+
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            lines = part.splitlines()
+            if lines and lines[0].strip().lower() in {"python", "py"}:
+                part = "\n".join(lines[1:])
+            if "def pacman_agent" in part:
+                return part.strip() or original_code
+
+    if "def pacman_agent" in text:
+        start = text.find("def pacman_agent")
+        return text[start:].strip() or original_code
+
+    return original_code
 
 class HeuristicLLMMutator:
     """
@@ -84,80 +194,131 @@ class HeuristicLLMMutator:
             provider="heuristic",
         )
 
-
-class OpenAICompatibleMutator:
-    """
-    Optional API-backed mutator for OpenAI-compatible chat endpoints.
-    """
-
+class LlamaServerMutator:
     def __init__(self, settings: LLMSettings):
-        try:
-            from openai import OpenAI  # type: ignore
-        except Exception as exc:
-            raise RuntimeError(
-                "The 'openai' package is not installed. Install it or use heuristic mode."
-            ) from exc
-
-        api_key = settings.api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("No API key provided for OpenAI-compatible mutation.")
-
-        client_kwargs: dict[str, Any] = {"api_key": api_key}
-        if settings.base_url:
-            client_kwargs["base_url"] = settings.base_url
-
-        self.client = OpenAI(**client_kwargs)
-        self.model = settings.model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
+        self.provider = "llama-server"
         self.temperature = settings.temperature
-        self.provider = settings.provider
+        self.base_url = (settings.base_url or "http://127.0.0.1:8080").rstrip("/")
 
     def mutate(self, code: str, problem_description: str = "", language: str = "python") -> MutationOutput:
+
         prompt = f"""
-You are an algorithm-improvement agent inside an evolutionary search loop.
+    You are a code mutation engine.
 
-Rules:
-- Make one small targeted improvement.
-- Preserve the overall structure.
-- Keep the output valid {language} when possible.
-- Return strict JSON only.
+    Return only valid {language} code.
+    Return exactly one function named pacman_agent.
+    The function signature must be exactly:
+    def pacman_agent(state):
 
-Problem description:
-{problem_description.strip() or '(not provided)'}
+    Do not create helper functions.
+    Do not rename the function.
+    Do not explain anything.
+    Do not include markdown.
+    Do not output text before or after the code.
 
-Current candidate code:
-{code}
+    Make exactly one small improvement only.
 
-Return JSON with keys:
-modified_code, mutation_summary, expected_improvement
-""".strip()
+    Problem:
+    {problem_description.strip() or "Improve Pacman behavior while balancing safety and food collection."}
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=self.temperature,
-            messages=[
-                {"role": "system", "content": "You improve algorithm candidates with small safe mutations."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
+    Original code:
+    {code}
+    """.strip()
+
+        payload = {
+            "prompt": prompt,
+            "n_predict": 64,
+            "temperature": float(self.temperature),
+            "stop": ["```", "\n\n\n"],
+        }
+
+        req = urllib.request.Request(
+            url=f"{self.base_url}/completion",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
 
-        content = response.choices[0].message.content or "{}"
-        data = json.loads(content)
-        mutated = str(data.get("modified_code", code)).strip() or code
+        print(f"[LLM DEBUG] Calling llama-server at {self.base_url}/completion")
 
-        if language.lower() == "python" and not is_valid_python(mutated):
-            mutated = code.rstrip() + "\n# llm mutation rejected due to invalid syntax"
-            summary = "LLM output was invalid Python; preserved original code with note."
-        else:
-            summary = str(data.get("mutation_summary", "LLM-guided mutation applied."))
+        try:
+            start = time.perf_counter()
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            elapsed = time.perf_counter() - start
+            print(f"[LLM DEBUG] llama-server responded in {elapsed:.2f} seconds")
+        except urllib.error.URLError as exc:
+            print(f"[LLM DEBUG] llama-server request failed: {exc}")
+            return MutationOutput(
+                code=code,
+                summary=f"llama-server unavailable ({exc}); original code preserved.",
+                expected_improvement="",
+                provider="llama-server-error",
+            )
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            print("[LLM DEBUG] llama-server returned non-JSON output")
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned invalid JSON; original code preserved.",
+                expected_improvement="",
+                provider="llama-server-error",
+            )
+
+        text = str(data.get("content", "")).strip()
+        mutated = extract_llama_code(text, original_code=code)
+
+        if not mutated.strip():
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned empty output; original code preserved.",
+                expected_improvement="",
+                provider=self.provider,
+            )
+
+        bad_markers = ["explanation", "this code", "here is", "to improve"]
+        if any(marker in mutated.lower() for marker in bad_markers):
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned explanatory text; original code preserved.",
+                expected_improvement="",
+                provider=self.provider,
+            )
+
+        if language.lower() == "python":
+            if not is_valid_python(mutated):
+                return MutationOutput(
+                    code=code,
+                    summary="llama-server returned invalid Python; original code preserved.",
+                    expected_improvement="",
+                    provider=self.provider,
+                )
+
+            if not is_valid_pacman_agent(mutated):
+                return MutationOutput(
+                    code=code,
+                    summary="llama-server changed the required pacman_agent interface; original code preserved.",
+                    expected_improvement="",
+                    provider=self.provider,
+                )
+
+            if not has_valid_pacman_actions(mutated):
+                return MutationOutput(
+                    code=code,
+                    summary="llama-server returned an invalid Pacman action; original code preserved.",
+                    expected_improvement="",
+                    provider=self.provider,
+                )
 
         return MutationOutput(
             code=mutated,
-            summary=summary,
-            expected_improvement=str(data.get("expected_improvement", "")),
+            summary="Local llama-server mutation applied.",
+            expected_improvement="Local server suggested a small targeted refinement.",
             provider=self.provider,
         )
-
+    
 
 class LLMMutator:
     def __init__(self, settings: LLMSettings | None = None):
@@ -166,17 +327,23 @@ class LLMMutator:
 
     def mutate(self, code: str, problem_description: str = "", language: str = "python") -> MutationOutput:
         provider = (self.settings.provider or "heuristic").lower()
+        print(f"[LLM DEBUG] Requested provider: {provider}")
+
         if provider in {"", "heuristic", "offline", "none"}:
+            print("[LLM DEBUG] Using HEURISTIC mutator")
             return self.fallback.mutate(code, problem_description, language)
 
-        try:
-            mutator = OpenAICompatibleMutator(self.settings)
-            return mutator.mutate(code, problem_description, language)
-        except Exception as exc:
-            fallback = self.fallback.mutate(code, problem_description, language)
-            return MutationOutput(
-                code=fallback.code,
-                summary=f"API mutation unavailable ({exc}); used heuristic fallback. {fallback.summary}",
-                expected_improvement=fallback.expected_improvement,
-                provider="heuristic-fallback",
-            )
+        if provider == "llama":
+            print("[LLM DEBUG] Using LLAMA.CPP mutator")
+            try:
+                mutator = LlamaServerMutator(self.settings)
+                return mutator.mutate(code, problem_description, language)
+            except Exception as exc:
+                print(f"[LLM DEBUG] Llama failed → fallback triggered: {exc}")
+                fallback = self.fallback.mutate(code, problem_description, language)
+                return MutationOutput(
+                    code=fallback.code,
+                    summary=f"Llama unavailable ({exc}); used heuristic fallback. {fallback.summary}",
+                    expected_improvement=fallback.expected_improvement,
+                    provider="heuristic-fallback",
+                )
