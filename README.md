@@ -167,15 +167,125 @@ pip install -e .
 
 ## 🔥 Run Local LLM (IMPORTANT)
 
-Start the llama server:
+This project uses a **local LLM powered by llama.cpp (`llama-server`)**.  
+You must set this up before using `llm` mutation mode.
+
+---
+
+### 1. Download llama.cpp (Prebuilt Binaries)
+
+Download from:  
+https://github.com/ggerganov/llama.cpp/releases
+
+Download the Windows CPU version (example):
+
+- `llama-binaries-win-cpu-x64.zip`
+
+Extract the contents into:
+Models/llama/
+
+
+After extraction, your folder should look like:
 ```text
-.\Models\llama\llama-server.exe ^
-  -m .\Models\llama\models\tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf ^
-  --host 127.0.0.1 ^
-  --port 8080
+Models/
+└── llama/
+├── llama-server.exe
+├── llama-cli.exe
+├── ggml-cpu-haswell.dll
+└── ...
 ```
-You should see:
+
+---
+
+### 2. Download a GGUF Model
+
+Download a small model (recommended for prototype):
+
+https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+
+Download file:
+
+- `tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`
+
+Place it here:
+Models/llama/models/
+
+Final structure:
+Models/
+└── llama/
+├── llama-server.exe
+└── models/
+└── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+
+---
+
+### 3. Start the LLM Server
+
+Open PowerShell in the project root and run:
+```text
+.\Models\llama\llama-server.exe -m .\Models\llama\models\tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+--host 127.0.0.1 `
+--port 8080
+```
+
+If successful, you will see:
+```text
 server is listening on http://127.0.0.1:8080
+```
+
+⚠️ Keep this terminal open while running the UI.
+
+---
+
+### 4. How the System Uses the LLM
+
+- The UI sends mutation requests to:
+```text
+http://127.0.0.1:8080/completion
+```
+
+- The LLM:
+  - receives the current code and problem description
+  - generates a small mutation
+  - returns updated code
+
+- The system then:
+  - validates the output
+  - evaluates fitness
+  - continues evolution
+
+---
+
+### 5. Troubleshooting
+
+**Connection refused**
+- Ensure `llama-server` is running
+
+**Timeout errors**
+- Use a smaller model (TinyLlama)
+- Increase timeout if needed
+
+**Invalid outputs**
+- Expected for small models
+- Automatically handled by validation layer
+
+---
+
+### 6. Notes
+
+- Runs entirely locally (no API required)
+- Model files are large → excluded via `.gitignore`
+- TinyLlama is used for speed, not accuracy
+
+---
+
+### Optional: Test the Server
+```text
+curl http://127.0.0.1:8080/completion ^
+-H "Content-Type: application/json" ^
+-d "{"prompt":"hello","n_predict":10}"
+```
+If it returns text, the server is working.
 
 ---
 
