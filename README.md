@@ -4,223 +4,217 @@ This project implements a simplified evolutionary agent inspired by **AlphaEvolv
 
 The system integrates:
 - Evolutionary algorithms
-- LLM-guided mutation (with fallback)
+- Local LLM-guided mutation (llama.cpp server)
 - FAISS + SBERT (vector database)
 - A Streamlit-based UI
 
 ---
 
-## Current Prototype Features
+## 🚀 Prototype Features
 
 ### Evolution Engine
 - Generates candidate programs across generations
 - Supports multiple mutation modes:
   - `none` → baseline (no change)
   - `random` → rule-based mutation
-  - `llm` → LLM-guided mutation (or fallback)
+  - `llm` → LLM-guided mutation (local)
 - Top-k selection strategy
 - Tracks best candidate across generations
 
-Core implementation in: 
-- src/evolve/engine.py
+Core implementation:
+- `src/evolve/engine.py`
 
 ---
 
-### LLM Mutation ( with Fallback)
+## 🧠 LLM Mutation (Local - llama.cpp Server)
 
-The system supports **LLM-guided mutation** with a safe fallback:
+The system uses a **locally hosted LLM via llama.cpp (`llama-server`)**:
 
-- Uses API-based mutation when available
-- Falls back to a heuristic mutator if no API key is provided
+- Runs entirely on the user's machine (no API required)
+- Uses HTTP requests instead of subprocess calls
+- Avoids repeated model loading → improves performance
+- Ensures privacy and offline capability
 
-#### Example:
+### Why llama-server?
+- Faster than `llama-cli` (no reload per generation)
+- Required for iterative evolutionary loops
+- Supports scalable mutation generation
 
-```python```
-LLMSettings(provider="heuristic")
+### Mutation Constraints (IMPORTANT)
 
-- Heuristic mutator ensures the system works offline
-- API mutation uses OpenAI-compatible endpoints when configured
+To ensure valid outputs, the system enforces:
 
-See: src/evolve/generator.py
+- Must return exactly one function:
+  
+  def pacman_agent(state):
 
-This includes:
-- HeursticLLMMutator (offline fallback)
-- OpenAiCompatibleMutator (API-based)
-- Automatic fallback if API fails
+- No helper functions allowed
+- Must return valid actions only:
+  - "run_away"
+  - "eat_food"
+  - "wait"
+
+### Validation Layer
+
+The system includes strict validation:
+
+- Syntax validation (`ast.parse`)
+- Function structure validation
+- Domain-specific validation (allowed actions)
+- Rejects invalid or malformed LLM outputs
+
+File:
+- `src/evolve/generator.py`
 
 ---
 
-### Fitness & Evolution
+## ⚙️ Fitness & Evaluation
 
-## Fitness function:
-- Fitness = w1 * score + w2 * survival_time - w3 * steps
-  - Score -> maximize
-  - Survival time -> maximize
-  - Steps (cost) -> minimize
-- Evaluation uses a deterministic stub evaluator
+### Fitness Function:
+Fitness = w1 * score + w2 * survival_time - w3 * steps
 
-See:
-- src/evolve/fitness.py
-- src/evolve/evaluator.py
+- Score → maximize
+- Survival time → maximize
+- Steps → minimize
+
+Evaluation uses a **deterministic stub environment**.
+
+Files:
+- `src/evolve/fitness.py`
+- `src/evolve/evaluator.py`
 
 ---
 
-### Streamlit UI
+## 🖥️ Streamlit UI
 
 The UI allows users to:
 
-- Input algorithm description or psuedocode
-- Provide inital code
-- adjust fitness weights
+- Input **initial code (required)**
+- Input **algorithm description (optional)**
+- Adjust fitness weights
 - Choose mutation mode
 - Set number of generations
 
-Displays:
-
-- Best fitness
+### Displays:
+- Best fitness score
 - Best solution
 - Raw metrics (score, survival time, steps)
 - Fitness progression graph
+- CSV export of results
 
 ---
 
-### Vector Database (FAISS + SBERT)
-
-The database includes:
+## 🧠 Vector Database (FAISS + SBERT)
 
 - Sentence embeddings via SBERT
 - FAISS index for similarity search
-- Supports future retrieval-augmented mutation
+- Designed for future retrieval-augmented mutation
 
-See:
-
-- src/embeddings/sbert.py
-- src/vectordb/faiss_store.py
+Files:
+- `src/embeddings/sbert.py`
+- `src/vectordb/faiss_store.py`
 
 ---
 
-### Project Structure
+## 📂 Project Structure
 
-```text
 src/
 ├── evolve/
-│   ├── engine.py        # Evolution loop
-│   ├── evaluator.py     # Candidate evaluation
-│   ├── fitness.py       # Fitness computation
-│   ├── generator.py     # Mutation (LLM + heuristic)
+│   ├── engine.py
+│   ├── evaluator.py
+│   ├── fitness.py
+│   ├── generator.py
 │
 ├── embeddings/
-│   └── sbert.py         # Embedding model
+│   └── sbert.py
 │
 ├── vectordb/
-│   └── faiss_store.py   # FAISS interface
+│   └── faiss_store.py
 
 Scripts/
-├── build_faiss_index.py  # Builds index
-├── query_faiss_index.py  # Queries index
-└── run_prototype_check.py # Runs LLM Prototyep
+├── build_faiss_index.py
+├── query_faiss_index.py
+└── run_prototype_check.py
 
 UI/
-└── UI.py     # Frontend UI
+└── UI.py
 
 Data/
-└── indexes/             # FAISS index storage
+└── indexes/
 
 Tests/
-└── test_*.py            # Unit tests
-```
+└── test_*.py
+
 ---
 
-### How to Run
+## ▶️ How to Run
 
-1. Clone Repository:
-
-```text
+### 1. Clone Repo
 git clone https://github.com/jeremiahulate/CS5381-Analysis-of-Algorithms-Project.git
-```
 
-3. Create virtual environment:
-
-```text
-python -m venv .venv
+### 2. Setup Environment
+python -m venv .venv  
 .\.venv\Scripts\Activate.ps1
-```
 
-4. Install Dependencies:
-
-```text
-pip install -r requirements-prototype.txt
+### 3. Install Dependencies
+pip install -r requirements-prototype.txt  
 pip install -e .
-```
 
-The dependencies include:
+---
 
-- Streamlit
-- FAISS
-- SBERT
-- Optional OpenAI support
+## 🔥 Run Local LLM (IMPORTANT)
 
-5. Run the UI:
+Start the llama server:
 
-```text
+.\Models\llama\llama-server.exe ^
+  -m .\Models\llama\models\tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf ^
+  --host 127.0.0.1 ^
+  --port 8080
+
+You should see:
+server is listening on http://127.0.0.1:8080
+
+---
+
+## ▶️ Run UI
+
 streamlit run UI/UI.py
-```
-
-## Running Prototype Scripts
-
-You can test the evolution system directly with:
-```text
-python Scripts/run_prototype_check.py
-```
-
-This will run:
-
-- LLM mutation mode
-- Fitness evaluation
-- Evolution loop
-
-Example usage includes:
-
-- LLM mutation with fallback
-- Mutation summaries per generation
 
 ---
 
-### Experiment Modes
+## 🧪 Experiment Modes
 
-This system supports:
+- No Evolution (`none`)
+- Random Mutation (`random`)
+- LLM Mutation (`llm`)
 
-- No evolution
-- Random Mutation
-- LLM-guided Mutation (heuristic or API)
-
-These modes allow comparison of:
-
+These allow comparison of:
 - Baseline performance
-- Random Improvements
-- Guided Improvements
+- Random improvements
+- LLM-guided improvements
 
 ---
 
-### Current Limitations
+## ⚠️ Current Limitations
 
-- Pacman environment is simulated (stub evaluator)
-- LLM mutation may use heuristic fallback if API not configured
-- FAISS retrieval is implemented but not fully integrated into mutation loop
-
----
-
-### Future Work
-
-- Integrate real Pacman environment for evaluation
-- Fully integrate FAISS retrieval into mutation generation
-- Improve LLM mutation strategies
-- Add multi-run experiment comparison (none vs random vs llm)
-- Optimize search performance with caching
+- Stub evaluator (not real Pacman environment)
+- Small local model (TinyLlama) → limited reasoning ability
+- LLM occasionally produces invalid outputs (handled via validation)
+- FAISS not yet integrated into mutation loop
 
 ---
 
-### References
+## 🚧 Future Work
+
+- Integrate real environment for evaluation
+- FAISS-guided mutation (RAG)
+- Improve mutation diversity
+- Multi-run comparison visualization
+- Performance optimization
+
+---
+
+## 📚 References
 
 - AlphaEvolve (Google Research)
 - Evolutionary Algorithms
