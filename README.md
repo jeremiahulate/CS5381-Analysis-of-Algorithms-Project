@@ -338,3 +338,4 @@ These allow comparison of:
 - Evolutionary Algorithms
 - Sentence Transformers (SBERT)
 - FAISS (Facebook AI Similarity Search)
+- llama.cpp
