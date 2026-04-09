@@ -10,7 +10,7 @@ The system integrates:
 
 ---
 
-## 🚀 Prototype Features
+## Prototype Features
 
 ### Evolution Engine
 - Generates candidate programs across generations
@@ -26,7 +26,7 @@ Core implementation:
 
 ---
 
-## 🧠 LLM Mutation (Local - llama.cpp Server)
+## LLM Mutation (Local - llama.cpp Server)
 
 The system uses a **locally hosted LLM via llama.cpp (`llama-server`)**:
 
@@ -68,7 +68,7 @@ File:
 
 ---
 
-## ⚙️ Fitness & Evaluation
+## Fitness & Evaluation
 
 ### Fitness Function:
 Fitness = w1 * score + w2 * survival_time - w3 * steps
@@ -85,7 +85,7 @@ Files:
 
 ---
 
-## 🖥️ Streamlit UI
+## Streamlit UI
 
 The UI allows users to:
 
@@ -104,7 +104,7 @@ The UI allows users to:
 
 ---
 
-## 🧠 Vector Database (FAISS + SBERT)
+## Vector Database (FAISS + SBERT)
 
 - Sentence embeddings via SBERT
 - FAISS index for similarity search
@@ -116,7 +116,7 @@ Files:
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 ```text
 src/
 ├── evolve/
@@ -147,7 +147,7 @@ Tests/
 ```
 ---
 
-## ▶️ How to Run
+## How to Run
 
 ### 1. Clone Repo
 ```text
@@ -165,7 +165,7 @@ pip install -e .
 ```
 ---
 
-## 🔥 Run Local LLM (IMPORTANT)
+## Run Local LLM (IMPORTANT)
 
 This project uses a **local LLM powered by llama.cpp (`llama-server`)**.  
 You must set this up before using `llm` mutation mode.
@@ -238,7 +238,7 @@ If successful, you will see:
 server is listening on http://127.0.0.1:8080
 ```
 
-⚠️ Keep this terminal open while running the UI.
+Keep this terminal open while running the UI.
 
 ---
 
@@ -294,13 +294,13 @@ If it returns text, the server is working.
 
 ---
 
-## ▶️ Run UI
+## Run UI
 ```text
 streamlit run UI/UI.py
 ```
 ---
 
-## 🧪 Experiment Modes
+## Experiment Modes
 
 - No Evolution (`none`)
 - Random Mutation (`random`)
@@ -313,7 +313,7 @@ These allow comparison of:
 
 ---
 
-## ⚠️ Current Limitations
+## Current Limitations
 
 - Stub evaluator (not real Pacman environment)
 - Small local model (TinyLlama) → limited reasoning ability
@@ -322,7 +322,7 @@ These allow comparison of:
 
 ---
 
-## 🚧 Future Work
+## Future Work
 
 - Integrate real environment for evaluation
 - FAISS-guided mutation (RAG)
@@ -332,7 +332,7 @@ These allow comparison of:
 
 ---
 
-## 📚 References
+## References
 
 - AlphaEvolve (Google Research)
 - Evolutionary Algorithms
