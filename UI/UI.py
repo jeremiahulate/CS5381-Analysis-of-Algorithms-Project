@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
+import time
 from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 
@@ -56,7 +56,8 @@ def run_backend_evolution(
     mutation_mode: str,
     problem_description: str,
     api_provider: str,
-    api_key: str,
+    population_size: int,
+    selection_k: int,
 ):
     evaluator = DeterministicStubPacmanEvaluator()
 
@@ -68,26 +69,23 @@ def run_backend_evolution(
 
     provider_map = {
         "Heuristic": "heuristic",
-        "OpenAI API": "openai",
         "Llama (local)": "llama",
     }
 
     llm_settings = LLMSettings(
         provider=provider_map.get(api_provider, "heuristic"),
-        api_key=api_key.strip() or None,
     )
     print(
         f"[UI DEBUG] api_provider={api_provider}, "
         f"mapped_provider={llm_settings.provider}, "
-        f"api_key_present={bool(llm_settings.api_key)}"
     )
     result = run_evolution(
         initial_code=initial_code,
         evaluator=evaluator,
         weights=weights,
         generations=generations,
-        population_size=1,
-        selection_k=1,
+        population_size=int(population_size),
+        selection_k=int(selection_k),
         mutation_mode=mutation_mode,
         language=language,
         seed=42,
@@ -128,8 +126,6 @@ def save_history_csv(history_df: pd.DataFrame, student_name: str) -> str:
 
 
 # Session defaults
-if "api_key" not in st.session_state:
-    st.session_state["api_key"] = ""
 if "api_provider" not in st.session_state:
     st.session_state["api_provider"] = "Heuristic (Offline)"
 if "problem_description" not in st.session_state:
@@ -142,6 +138,8 @@ if "history" not in st.session_state:
     st.session_state["history"] = []
 if "last_csv_path" not in st.session_state:
     st.session_state["last_csv_path"] = ""
+if "runtime_timeseconds" not in st.session_state:
+    st.session_state["runtime_timeseconds"] = 0.0
 
 # Evolution state
 if "evolution_running" not in st.session_state:
@@ -165,27 +163,17 @@ with st.sidebar:
 
     st.session_state["api_provider"] = st.selectbox(
         "Provider",
-        ["Heuristic (Offline)", "OpenAI API", "Llama (local)"],
-        index=["Heuristic (Offline)", "OpenAI API", "Llama (local)"].index(st.session_state["api_provider"])
-        if st.session_state["api_provider"] in ["Heuristic (Offline)", "OpenAI API", "Llama (local)"]
+        ["Heuristic (Offline)", "Llama (local)"],
+        index=["Heuristic (Offline)",  "Llama (local)"].index(st.session_state["api_provider"])
+        if st.session_state["api_provider"] in ["Heuristic (Offline)", "Llama (local)"]
         else 0,
+        disabled=st.session_state["evolution_running"],
     )
 
-    api_key_input = st.text_input(
-        "API key (optional)",
-        type="password",
-        placeholder="Enter your API key here",
-        value=st.session_state["api_key"],
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Save key", type="primary"):
-            st.session_state["api_key"] = api_key_input.strip()
-
-    with col2:
-        if st.button("Clear key"):
-            st.session_state["api_key"] = ""
+    if st.session_state["api_provider"] == "Llama (local)":
+        st.caption("Make sure llama-server is running locally at http://127.0.0.1:8080")
+    else:
+        st.caption("Heuristic mode runs fully offline without the local LLM server.")
 
 
 st.markdown('<h1 class="top-center">Welcome to AlgoChat</h1>', unsafe_allow_html=True)
@@ -197,10 +185,6 @@ student_name = st.text_input(
     placeholder="e.g. Jeremiah_Ulate"
 )
 
-if st.session_state["api_key"]:
-    st.success("API key saved for this session.")
-else:
-    st.info("No API key provided (optional). You can still use the app.")
 
 st.markdown("## Algorithm / Problem Description (optional)")
 st.session_state["problem_description"] = st.text_area(
@@ -238,6 +222,26 @@ mutation_mode = st.selectbox(
     disabled=st.session_state["evolution_running"],
 )
 
+st.markdown("## Evolution Settings")
+
+population_size = st.number_input(
+    "Population size",
+    min_value=1,
+    max_value=20,
+    value=4,
+    step=1,
+    disabled=st.session_state["evolution_running"],
+)
+
+selection_k = st.number_input(
+    "Top-K Selection",
+    min_value=1,
+    max_value=int(population_size),
+    value=min(2, int(population_size)),
+    step=1,
+    disabled=st.session_state["evolution_running"],
+)
+
 st.markdown("## Fitness Weights (must sum to 1)")
 w_col1, w_col2, w_col3 = st.columns(3)
 with w_col1:
@@ -263,7 +267,7 @@ with col2:
         st.session_state["initial_code"] = ""
 
 
-with st.expander("Preview", expanded=False):
+with st.expander("Algorithm / Problem Description", expanded=False):
     st.write(st.session_state["problem_description"] or "(empty)")
 
 with st.expander("Initial Code preview", expanded=False):
@@ -296,11 +300,12 @@ def render_dashboard():
     else:
         dash_status.info(f"Status: **{status}**")
 
-    a, b, c, d = dash_metrics.columns(4)
+    a, b, c, d, e = dash_metrics.columns(5)
     a.metric("Generations performed", f"{st.session_state['gen_done']}")
     b.metric("Best fitness", f"{st.session_state['best_fitness']:.3f}" if st.session_state["best_fitness"] != float("-inf") else "—")
     c.metric("Target generations", f"{int(target_generations)}")
     d.metric("Best score (raw)", f"{st.session_state['best_metrics']['score']:.0f}")
+    e.metric("Runtime (seconds)", f"{st.session_state['runtime_timeseconds']:.2f}")
 
 render_dashboard()
 
@@ -320,6 +325,7 @@ if reset_stats_btn:
     st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     st.session_state["history"] = []
     st.session_state["last_csv_path"] = ""
+    st.session_state["runtime_timeseconds"] = 0.0
     dash_progress.progress(0)
     render_dashboard()
 
@@ -332,6 +338,7 @@ if start_btn:
     st.session_state["best_metrics"] = {"score": 0.0, "survival_time": 0.0, "steps": 0.0}
     st.session_state["history"] = []
     st.session_state["last_csv_path"] = ""
+    run_start = time.perf_counter()
     dash_progress.progress(0)
     render_dashboard()
 
@@ -343,12 +350,13 @@ if start_btn:
         w2=w2,
         w3=w3,
         mutation_mode=mutation_mode,
+        population_size=int(population_size),
+        selection_k=int(selection_k),
         problem_description=(
     st.session_state["problem_description"].strip()
     or "Improve the given code conservatively."
 ),
         api_provider=st.session_state["api_provider"],
-        api_key=st.session_state["api_key"],
     )
 
     for item in result.history:
@@ -370,7 +378,7 @@ if start_btn:
     st.session_state["evolution_running"] = False
     st.session_state["stop_requested"] = False
     st.session_state["history"] = result.history
-
+    st.session_state["runtime_timeseconds"] = time.perf_counter() - run_start
     history_df = history_to_dataframe(result.history)
     if not history_df.empty:
         st.session_state["last_csv_path"] = save_history_csv(history_df,student_name)
@@ -416,6 +424,7 @@ if st.session_state["best_solution"].strip():
     bm = st.session_state["best_metrics"] 
     st.write(
         f"**Best Fitness:** `{st.session_state['best_fitness']:.3f}`  \n"
+        f"**Runtime:** '{st.session_state['runtime_timeseconds']:.2f}' seconds' \n"
         f"**Raw Metrics:** score=`{bm['score']:.0f}`, survival_time=`{bm['survival_time']:.2f}`, steps=`{bm['steps']:.0f}`"
     )
     st.code(st.session_state["best_solution"], language=st.session_state["code_language"])

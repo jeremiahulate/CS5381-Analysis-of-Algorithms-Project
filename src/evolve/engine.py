@@ -127,7 +127,7 @@ def generate_candidates(
     rng: random.Random,
     problem_description: str = "",
     llm_settings: LLMSettings | None = None,
-) -> tuple[List[CandidateProgram], List[str]]:
+) -> tuple[List[CandidateProgram], List[str], List[str]]:
     if not parents:
         raise ValueError("At least one parent candidate is required.")
 

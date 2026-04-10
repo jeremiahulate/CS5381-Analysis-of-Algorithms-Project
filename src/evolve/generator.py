@@ -4,7 +4,6 @@ import urllib.request
 import urllib.error
 import ast
 import json
-import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -26,10 +25,6 @@ class LLMSettings:
     model: str | None = None
     base_url: str | None = None
     temperature: float = 0.3
-
-
-DEFAULT_MODEL = "gpt-4o-mini"
-
 
 def is_valid_python(code: str) -> bool:
     try:
