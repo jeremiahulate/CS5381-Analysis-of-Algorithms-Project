@@ -1,0 +1,120 @@
+Pacman code templates and snippets:
+
+Template 1: simple agent structure
+```
+def pacman_agent(state):
+    if state.ghosts_nearby():
+        return "run_away"
+    elif state.has_food_nearby():
+        return "eat_food"
+    else:
+        return "move_randomly"
+```
+
+Template 2: weighted decision logic
+```
+def pacman_agent(state):
+    if state.ghosts_nearby() and state.ghost_distance() < 3:
+        return "run_away"
+    if state.food_distance() < 5:
+        return "eat_food"
+    return "move_randomly"
+```
+
+Template 3: heuristic adjustment
+```
+def pacman_agent(state):
+    score = state.food_value() - 2 * state.ghost_value()
+    if score > 0:
+        return "eat_food"
+    return "run_away"
+```
+
+Mutation-friendly snippet ideas:
+- swap two lines within the decision section
+- change one condition to a stronger or weaker threshold
+- adjust heuristic weight by changing multipliers
+- change a return action from move_randomly to eat_food
+
+Search algorithm pseudocode for Pacman pathfinding:
+
+DFS (Depth-First Search):
+- Use a stack to explore paths.
+- Push current position, mark as visited.
+- For each neighbor, if not visited and safe, push to stack.
+- Stop when food is found or stack is empty.
+- Good for deep exploration but may not find shortest path.
+
+Pseudocode:
+```
+def dfs(current, goal, visited):
+    if current == goal:
+        return path
+    visited.add(current)
+    for neighbor in get_neighbors(current):
+        if neighbor not in visited and is_safe(neighbor):
+            path.append(neighbor)
+            result = dfs(neighbor, goal, visited)
+            if result:
+                return result
+            path.pop()
+    return None
+```
+
+BFS (Breadth-First Search):
+- Use a queue to explore level by level.
+- Enqueue current position, mark as visited.
+- Dequeue, check neighbors, enqueue unvisited safe ones.
+- Always finds shortest path in unweighted grid.
+- Good for Pacman to find nearest food.
+
+Pseudocode:
+```
+def bfs(start, goal):
+    queue = [start]
+    visited = {start}
+    parent = {start: None}
+    while queue:
+        current = queue.pop(0)
+        if current == goal:
+            return reconstruct_path(parent, goal)
+        for neighbor in get_neighbors(current):
+            if neighbor not in visited and is_safe(neighbor):
+                visited.add(neighbor)
+                queue.append(neighbor)
+                parent[neighbor] = current
+    return None
+```
+
+A* (A-Star Search):
+- Use priority queue with f = g + h (g: cost so far, h: heuristic to goal).
+- Heuristic: Manhattan distance for grid.
+- Expands nodes with lowest f first.
+- Efficient for Pacman to balance path cost and distance to food.
+
+Pseudocode:
+```
+def a_star(start, goal):
+    open_set = PriorityQueue()
+    open_set.put((0, start))  # (f, node)
+    came_from = {}
+    g_score = {start: 0}
+    f_score = {start: heuristic(start, goal)}
+    while not open_set.empty():
+        current = open_set.get()[1]
+        if current == goal:
+            return reconstruct_path(came_from, goal)
+        for neighbor in get_neighbors(current):
+            tentative_g = g_score[current] + 1  # assume cost 1
+            if tentative_g < g_score.get(neighbor, inf):
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
+                open_set.put((f_score[neighbor], neighbor))
+    return None
+
+def heuristic(a, b):
+    return abs(a.x - b.x) + abs(a.y - b.y)  # Manhattan
+```
+
+Use these in Pacman agents for pathfinding to food while avoiding ghosts.

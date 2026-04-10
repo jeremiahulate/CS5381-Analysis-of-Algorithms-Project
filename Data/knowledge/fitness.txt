@@ -1,0 +1,22 @@
+Fitness and metrics for Pacman code optimization:
+
+- score: points earned by eating food, completing objectives, and high-value actions.
+- survival time: how long Pacman stays alive.
+- steps: number of moves taken (fewer is better).
+
+Fitness formula:
+fitness = w_score * score + w_survival * survival_time - w_steps * steps
+
+Weights should sum to 1.0.
+
+What good means:
+- high score
+- long survival
+- fewer steps
+
+Example:
+- A candidate with strong food collection and good ghost avoidance is good.
+- A candidate with many steps but low score is not good.
+- A candidate that survives longer and keeps steps low is best.
+
+Use this to rank candidates and choose the best mutated code.

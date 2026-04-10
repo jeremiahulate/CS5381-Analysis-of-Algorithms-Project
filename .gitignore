@@ -1,0 +1,19 @@
+.venv/
+*.egg-info/
+__pycache__/
+*.pyc
+Data/evolution_runs/
+
+# Ignore everything under Models by default
+Models/*
+
+# Keep folder structure for llama
+!Models/llama/
+!Models/llama/.gitkeep
+!Models/llama/models/
+!Models/llama/models/.gitkeep
+
+# Still ignore large/binary files everywhere
+*.gguf
+*.exe
+*.dll

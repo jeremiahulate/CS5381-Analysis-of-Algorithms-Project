@@ -1,0 +1,20 @@
+Mutation strategies:
+
+- swap conditional branches
+- modify heuristic values
+- change return actions
+- insert new decision logic
+- change condition operands
+- add a guard clause
+- replace one action with another (eat_food -> move_randomly)
+- adjust a comparison threshold
+- swap two lines of code
+- rearrange if/elif structure
+- add or remove a comment line
+- change the order of checks for ghosts, food, and safe moves
+
+Simple mutation ideas:
+- change condition: if ghost nearby -> if ghost very close
+- adjust heuristic weight: more weight to ghost distance
+- swap two lines: move the food check before the ghost check
+- change return to a safer action: return "run_away" instead of "move_randomly"
