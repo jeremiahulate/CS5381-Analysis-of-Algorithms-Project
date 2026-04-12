@@ -234,6 +234,7 @@ class LlamaServerMutator:
             method="POST",
         )
 
+        #LLM DEBUG
         print(f"[LLM DEBUG] Calling llama-server at {self.base_url}/completion")
 
         try:
@@ -241,8 +242,10 @@ class LlamaServerMutator:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             elapsed = time.perf_counter() - start
+            #LLM DEBUG
             print(f"[LLM DEBUG] llama-server responded in {elapsed:.2f} seconds")
         except urllib.error.URLError as exc:
+            #LLM DEBUG
             print(f"[LLM DEBUG] llama-server request failed: {exc}")
             return MutationOutput(
                 code=code,
@@ -254,6 +257,7 @@ class LlamaServerMutator:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            #LLM DEBUG
             print("[LLM DEBUG] llama-server returned non-JSON output")
             return MutationOutput(
                 code=code,
@@ -322,18 +326,22 @@ class LLMMutator:
 
     def mutate(self, code: str, problem_description: str = "", language: str = "python") -> MutationOutput:
         provider = (self.settings.provider or "heuristic").lower()
+        #LLMDEBUG
         print(f"[LLM DEBUG] Requested provider: {provider}")
 
         if provider in {"", "heuristic", "offline", "none"}:
+            #LLM DEBUG
             print("[LLM DEBUG] Using HEURISTIC mutator")
             return self.fallback.mutate(code, problem_description, language)
 
         if provider == "llama":
+            #LLM DEBUG
             print("[LLM DEBUG] Using LLAMA.CPP mutator")
             try:
                 mutator = LlamaServerMutator(self.settings)
                 return mutator.mutate(code, problem_description, language)
             except Exception as exc:
+                #LLM DEBUG
                 print(f"[LLM DEBUG] Llama failed → fallback triggered: {exc}")
                 fallback = self.fallback.mutate(code, problem_description, language)
                 return MutationOutput(

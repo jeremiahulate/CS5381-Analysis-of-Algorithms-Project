@@ -12,6 +12,7 @@ from src.evolve.engine import run_evolution
 from src.evolve.evaluator import DeterministicStubPacmanEvaluator
 from src.evolve.fitness import FitnessWeights
 from src.evolve.generator import LLMSettings
+from src.retrieval.faiss_retriever import FaissRetriever, RetrievedExample
 
 st.set_page_config(page_title="gradient color", layout="wide")
 
@@ -70,15 +71,27 @@ def run_backend_evolution(
     provider_map = {
         "Heuristic": "heuristic",
         "Llama (local)": "llama",
+        "Rag (FAISS-guided)": "rag",
     }
 
     llm_settings = LLMSettings(
         provider=provider_map.get(api_provider, "heuristic"),
     )
+    
+    knowledge_docs = [
+    "If a ghost is nearby, prioritize survival and move away.",
+    "When safe, prioritize food collection to improve score.",
+    "Shorter paths can reduce step cost and improve fitness.",
+    "Balance score, survival time, and movement efficiency.",
+    ]
+    retriever = FaissRetriever(knowledge_docs)
+    
+    # UI DEBUG
     print(
         f"[UI DEBUG] api_provider={api_provider}, "
         f"mapped_provider={llm_settings.provider}, "
     )
+    
     result = run_evolution(
         initial_code=initial_code,
         evaluator=evaluator,
@@ -91,6 +104,8 @@ def run_backend_evolution(
         seed=42,
         problem_description=problem_description,
         llm_settings=llm_settings,
+        retriever=retriever,
+        retrieval_top_k=1,
     )
 
     return result
@@ -163,15 +178,17 @@ with st.sidebar:
 
     st.session_state["api_provider"] = st.selectbox(
         "Provider",
-        ["Heuristic (Offline)", "Llama (local)"],
-        index=["Heuristic (Offline)",  "Llama (local)"].index(st.session_state["api_provider"])
-        if st.session_state["api_provider"] in ["Heuristic (Offline)", "Llama (local)"]
+        ["Heuristic (Offline)", "Llama (local)", "Rag (FAISS-guided)"],
+        index=["Heuristic (Offline)",  "Llama (local)", "Rag (FAISS-guided)"].index(st.session_state["api_provider"])
+        if st.session_state["api_provider"] in ["Heuristic (Offline)", "Llama (local)", "Rag (FAISS-guided)"]
         else 0,
         disabled=st.session_state["evolution_running"],
     )
 
     if st.session_state["api_provider"] == "Llama (local)":
         st.caption("Make sure llama-server is running locally at http://127.0.0.1:8080")
+    elif st.session_state["api_provider"] == "Rag (FAISS-guided)":
+        st.caption("RAG mode uses FAISS for context retrieval.")
     else:
         st.caption("Heuristic mode runs fully offline without the local LLM server.")
 
@@ -217,8 +234,8 @@ code_ok = bool(st.session_state["initial_code"].strip())
 st.markdown("## Mutation Mode")
 mutation_mode = st.selectbox(
     "Choose mutation mode",
-    ["none", "random", "llm"],
-    help="none = baseline, random = safe mutation, llm = placeholder until real LLM is integrated",
+    ["none", "random", "llm", "rag"],
+    help="none = baseline, random = safe mutation, llm = model-guided mutation, rag = FAISS-guided retrieval mutation",
     disabled=st.session_state["evolution_running"],
 )
 

@@ -10,7 +10,7 @@ from src.evolve.fitness import FitnessWeights, FitnessResult, compute_fitness
 from src.evolve.generator import LLMSettings, LLMMutator
 
 
-MutationMode = Literal["none", "random", "llm"]
+MutationMode = Literal["none", "random", "llm", "rag"]
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,8 @@ class EvolutionRunResult:
     history: List[GenerationSummary]
     best_overall: EvaluatedCandidate
 
-
+#function to check if mutated code is valid Python syntax to avoid 
+# introducing syntax errors during random mutations
 def is_valid_python(code: str) -> bool:
     try:
         ast.parse(code)
@@ -49,7 +50,8 @@ def is_valid_python(code: str) -> bool:
         return False
 
 
-
+#mutation that appends a comment to the end of the code to introduce 
+#variation without breaking syntax
 def mutate_add_comment(code: str, rng: random.Random) -> str:
     comments = [
         "# mutation applied",
@@ -60,7 +62,8 @@ def mutate_add_comment(code: str, rng: random.Random) -> str:
     return code.rstrip() + "\n" + rng.choice(comments)
 
 
-
+#mutation that replaces one known strategy token/literal with another 
+#to introduce variation while keeping the code likely valid and meaningful
 def mutate_replace_literal(code: str, rng: random.Random) -> str:
     replacements = [
         ("eat_food", "move_randomly"),
@@ -79,7 +82,8 @@ def mutate_replace_literal(code: str, rng: random.Random) -> str:
     return code.replace(old, new, 1)
 
 
-
+#mutation that inserts a safe line of code (like a comment or pass) at a random location 
+#in the code to introduce variation without breaking syntax
 def mutate_insert_line(code: str, rng: random.Random) -> str:
     lines = code.splitlines()
     insertions = [
@@ -95,7 +99,7 @@ def mutate_insert_line(code: str, rng: random.Random) -> str:
     return "\n".join(lines)
 
 
-
+#random mutation that tries multiple strategies and falls back to a safe comment mutation if needed
 def random_mutation(code: str, rng: random.Random, language: str = "python") -> tuple[str, str]:
     mutation_functions = [
         (mutate_add_comment, "Added a safe comment mutation"),
@@ -118,7 +122,74 @@ def random_mutation(code: str, rng: random.Random, language: str = "python") -> 
 
     return mutate_add_comment(original, rng), "Applied fallback comment mutation"
 
+#rag guided mutation
+def rag_guided_mutation(
+    code: str,
+    rng: random.Random,
+    retrieved_contexts: List[str],
+    language: str = "python",
+) -> tuple[str, str]:
+    """
+    Use retrieved FAISS contexts to guide mutation.
+    This is a simple deterministic mutation layer that can later be upgraded
+    to use an LLM with retrieved context in the prompt.
+    """
+    if language.lower() != "python":
+        return code, "RAG guidance available, but only Python mutation is implemented"
 
+    context = " ".join(retrieved_contexts).lower()
+
+    ghost_hits = sum(
+    phrase in context
+    for phrase in [
+        "ghost",
+        "run away",
+        "avoid ghost",
+        "prioritize survival",
+        "move away",
+    ]
+)
+
+    food_hits = sum(
+        phrase in context
+        for phrase in [
+            "food",
+            "collect food",
+            "eat food",
+            "prioritize food",
+            "when safe",
+        ]
+    )
+
+    has_ghost = ghost_hits >= 2
+    has_food = food_hits >= 1
+    
+    #RAG debug
+    print(f"[RAG DEBUG] ghost_hits={ghost_hits}, food_hits={food_hits}")
+    
+    if has_ghost and has_food:
+        new_code = '''def pacman_agent(state):
+        if state.isGhostNearby():
+            return "run_away"
+        return "eat_food"
+    '''
+        return new_code, "Applied RAG-guided ghost avoidance and food-priority mutation"
+
+    if has_ghost:
+        new_code = '''def pacman_agent(state):
+        if state.isGhostNearby():
+            return "run_away"
+        return "stay_safe"
+    '''
+        return new_code, "Applied RAG-guided ghost avoidance mutation"
+
+    if has_food:
+        new_code = '''def pacman_agent(state):
+        return "eat_food"
+    '''
+        return new_code, "Applied RAG-guided food-priority mutation"
+
+    return code, "No useful RAG signal found; original candidate kept"
 
 def generate_candidates(
     parents: List[CandidateProgram],
@@ -127,6 +198,8 @@ def generate_candidates(
     rng: random.Random,
     problem_description: str = "",
     llm_settings: LLMSettings | None = None,
+    retriever=None,
+    retrieval_top_k: int = 3,
 ) -> tuple[List[CandidateProgram], List[str], List[str]]:
     if not parents:
         raise ValueError("At least one parent candidate is required.")
@@ -157,6 +230,29 @@ def generate_candidates(
             new_code = mutation_output.code
             summary = mutation_output.summary
             provider = mutation_output.provider
+        
+        elif mutation_mode == "rag":
+            if retriever is None:
+                new_code, summary = random_mutation(parent.code, rng, parent.language)
+                summary = f"RAG fallback (no retriever): {summary}"
+                provider = "rag-fallback"
+            else:
+                query_text = f"{problem_description}\n\n{parent.code}"
+                retrieved = retriever.retrieve(query_text, top_k=retrieval_top_k)
+                retrieved_contexts = [item.text for item in retrieved]
+
+                ##debug print to verify retrieval results
+                print("\n[RAG DEBUG] Retrieved contexts:")
+                for ctx in retrieved_contexts:
+                    print("-", ctx)
+
+                new_code, summary = rag_guided_mutation(
+                    parent.code,
+                    rng,
+                    retrieved_contexts,
+                    parent.language,
+                )
+                provider = "rag"
 
         else:
             raise ValueError(f"Unsupported mutation mode: {mutation_mode}")
@@ -231,6 +327,8 @@ def run_evolution(
     seed: int | None = None,
     problem_description: str = "",
     llm_settings: LLMSettings | None = None,
+    retriever=None,
+    retrieval_top_k: int = 3,
 ) -> EvolutionRunResult:
     if generations < 1:
         raise ValueError("generations must be at least 1")
@@ -261,6 +359,8 @@ def run_evolution(
             rng=rng,
             problem_description=problem_description,
             llm_settings=llm_settings,
+            retriever=retriever,
+            retrieval_top_k=retrieval_top_k,
         )
 
         evaluated = evaluate_population(
