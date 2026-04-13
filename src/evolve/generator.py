@@ -5,11 +5,12 @@ import urllib.error
 import ast
 import json
 import time
+import random
 from dataclasses import dataclass
 from typing import Any
 from pathlib import Path
 
-
+print("[DEBUG] LOADED generator.py NEW VERSION")
 @dataclass(frozen=True)
 class MutationOutput:
     code: str
@@ -24,7 +25,60 @@ class LLMSettings:
     api_key: str | None = None
     model: str | None = None
     base_url: str | None = None
-    temperature: float = 0.3
+    temperature: float = 0.0
+
+def clean_llm_code_output(text: str) -> str:
+    text = text.strip()
+
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            cleaned = part.strip()
+            if cleaned.startswith("python"):
+                cleaned = cleaned[len("python"):].strip()
+            if "def pacman_agent" in cleaned:
+                text = cleaned
+                break
+
+    lines = text.splitlines()
+
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("def pacman_agent"):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        return text
+
+    cleaned_lines = [lines[start_idx].rstrip()]
+    base_indent = None
+
+    for line in lines[start_idx + 1:]:
+        stripped = line.strip()
+
+        if not stripped:
+            cleaned_lines.append("")
+            continue
+
+        current_indent = len(line) - len(line.lstrip())
+
+        if base_indent is None:
+            if current_indent == 0:
+                break
+            base_indent = current_indent
+            cleaned_lines.append(line.rstrip())
+            continue
+
+        if current_indent < base_indent:
+            break
+
+        if stripped.startswith(("Return ", "Do not ", "The function ", "Mutated code:", "Original code:")):
+            break
+
+        cleaned_lines.append(line.rstrip())
+
+    return "\n".join(cleaned_lines).strip()
 
 def is_valid_python(code: str) -> bool:
     try:
@@ -63,6 +117,9 @@ def has_valid_pacman_actions(code: str) -> bool:
         "run_away",
         "eat_food",
         "wait",
+        "move_randomly",
+        "search_food",
+        "stay_safe",
     }
 
     for node in ast.walk(tree):
@@ -111,7 +168,6 @@ def extract_llama_code(output: str, original_code: str) -> str:
         if s.startswith(skip_starts):
             continue
 
-        # skip banner / block characters
         if any(ch in s for ch in ("▄▄", "██", "▀▀")):
             continue
 
@@ -128,17 +184,96 @@ def extract_llama_code(output: str, original_code: str) -> str:
             part = part.strip()
             if not part:
                 continue
-            lines = part.splitlines()
-            if lines and lines[0].strip().lower() in {"python", "py"}:
-                part = "\n".join(lines[1:])
-            if "def pacman_agent" in part:
-                return part.strip() or original_code
 
-    if "def pacman_agent" in text:
-        start = text.find("def pacman_agent")
-        return text[start:].strip() or original_code
+            part_lines = part.splitlines()
+            if part_lines and part_lines[0].strip().lower() in {"python", "py"}:
+                part = "\n".join(part_lines[1:])
 
-    return original_code
+            extracted = _extract_complete_pacman_function(part, original_code)
+            if extracted != original_code:
+                return extracted
+
+    return extract_complete_pacman_function(text, original_code)
+
+def extract_complete_pacman_function(text: str, original_code: str) -> str:
+    lines = text.splitlines()
+
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("def pacman_agent"):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        return original_code
+
+    extracted = [lines[start_idx].rstrip()]
+    found_return = False
+
+    for line in lines[start_idx + 1:]:
+        stripped = line.strip()
+
+        if not stripped:
+            break
+
+        if not line.startswith((" ", "\t")):
+            break
+
+        extracted.append(line.rstrip())
+
+        if stripped.startswith("return ") or " return " in stripped:
+            found_return = True
+
+    code = "\n".join(extracted).strip()
+
+    if "def pacman_agent" not in code:
+        return original_code
+
+    if "return" not in code and not found_return:
+        return original_code
+
+    return code
+
+def extract_llama_action(output: str) -> str | None:
+    text = output.strip()
+
+    if not text:
+        return None
+
+    # normalize common wrappers / markdown
+    text = text.replace("`", "").strip()
+
+    allowed_actions = [
+        "run_away",
+        "eat_food",
+        "wait",
+        "move_randomly",
+    ]
+
+    # exact match
+    if text in allowed_actions:
+        return text
+
+    # quoted exact match
+    for action in allowed_actions:
+        if f'"{action}"' in text:
+            return action
+        if f"'{action}'" in text:
+            return action
+
+    # plain substring fallback
+    lower = text.lower()
+    for action in allowed_actions:
+        if action.lower() in lower:
+            return action
+
+    return None
+
+
+def wrap_action_as_pacman_agent(action: str) -> str:
+    return f'''def pacman_agent(state):
+    return "{action}"
+'''
 
 class HeuristicLLMMutator:
     """
@@ -198,33 +333,29 @@ class LlamaServerMutator:
     def mutate(self, code: str, problem_description: str = "", language: str = "python") -> MutationOutput:
 
         prompt = f"""
-    You are a code mutation engine.
+Return only one action string.
 
-    Return only valid {language} code.
-    Return exactly one function named pacman_agent.
-    The function signature must be exactly:
-    def pacman_agent(state):
+Choose the best action for Pacman based on this guidance.
+Allowed actions:
+- "eat_food"
+- "run_away"
+- "wait"
+- "move_randomly"
 
-    Do not create helper functions.
-    Do not rename the function.
-    Do not explain anything.
-    Do not include markdown.
-    Do not output text before or after the code.
+Guidance:
+{problem_description.strip()}
 
-    Make exactly one small improvement only.
-
-    Problem:
-    {problem_description.strip() or "Improve Pacman behavior while balancing safety and food collection."}
-
-    Original code:
-    {code}
-    """.strip()
+Current code:
+{code}
+""".strip()
 
         payload = {
             "prompt": prompt,
-            "n_predict": 64,
+            "n_predict": 16,
             "temperature": float(self.temperature),
-            "stop": ["```", "\n\n\n"],
+            "stop": [
+                "```",
+            ],
         }
 
         req = urllib.request.Request(
@@ -256,6 +387,8 @@ class LlamaServerMutator:
 
         try:
             data = json.loads(raw)
+            #LLM DEBUG
+            print("[LLM DEBUG] Raw llama-server action: JSON:", data)
         except json.JSONDecodeError:
             #LLM DEBUG
             print("[LLM DEBUG] llama-server returned non-JSON output")
@@ -267,6 +400,8 @@ class LlamaServerMutator:
             )
 
         text = str(data.get("content", "")).strip()
+        #LLM DEBUG
+        print(f"[LLM DEBUG] Raw llama-server output: {text}")
         mutated = extract_llama_code(text, original_code=code)
 
         if not mutated.strip():
@@ -277,23 +412,25 @@ class LlamaServerMutator:
                 provider=self.provider,
             )
 
-        bad_markers = ["explanation", "this code", "here is", "to improve"]
-        if any(marker in mutated.lower() for marker in bad_markers):
-            return MutationOutput(
-                code=code,
-                summary="llama-server returned explanatory text; original code preserved.",
-                expected_improvement="",
-                provider=self.provider,
-            )
-
         if language.lower() == "python":
-            if not is_valid_python(mutated):
+            cleaned_mutated = clean_llm_code_output(mutated)
+
+            print("\n[LLM DEBUG] Raw llama-server output:")
+            print(mutated)
+            print("\n[LLM DEBUG] Cleaned llama-server output:")
+            print(cleaned_mutated)
+
+            if not is_valid_python(cleaned_mutated):
+                #LLM DEBUG
+                print("[LLM DEBUG] Returning invalid-Python fallback from llama-server mutator")
                 return MutationOutput(
                     code=code,
-                    summary="llama-server returned invalid Python; original code preserved.",
+                    summary="llama-server returned invalid Python after cleanup; original code preserved.",
                     expected_improvement="",
                     provider=self.provider,
                 )
+
+            mutated = cleaned_mutated
 
             if not is_valid_pacman_agent(mutated):
                 return MutationOutput(
@@ -302,21 +439,132 @@ class LlamaServerMutator:
                     expected_improvement="",
                     provider=self.provider,
                 )
-
-            if not has_valid_pacman_actions(mutated):
+            
+            if mutated.strip() == code.strip():
                 return MutationOutput(
                     code=code,
-                    summary="llama-server returned an invalid Pacman action; original code preserved.",
+                    summary="llama-server returned unchanged code; original code preserved.",
                     expected_improvement="",
                     provider=self.provider,
                 )
-
+            
+        print("[LLM DEBUG] Returning successful MutationOutput from llama-server mutator")
         return MutationOutput(
+            #LLM DEBUG
             code=mutated,
             summary="Local llama-server mutation applied.",
             expected_improvement="Local server suggested a small targeted refinement.",
             provider=self.provider,
         )
+    def mutate_action(self, code: str, problem_description: str = "") -> MutationOutput:
+        prompt = f"""
+Reply with exactly one of these strings:
+eat_food
+run_away
+wait
+move_randomly
+
+Do not explain.
+Do not add punctuation.
+Do not add quotes.
+
+Guidance:
+{problem_description.strip()}
+
+Answer with one word only:
+""".strip()
+
+        payload = {
+            "prompt": prompt,
+            "n_predict": 16,
+            "temperature":0.3,
+            "stop": [
+                "```",
+            ],
+        }
+
+        req = urllib.request.Request(
+            url=f"{self.base_url}/completion",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        print(f"[LLM DEBUG] Calling llama-server action mode at {self.base_url}/completion")
+
+        try:
+            start = time.perf_counter()
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            elapsed = time.perf_counter() - start
+            print(f"[LLM DEBUG] llama-server action mode responded in {elapsed:.2f} seconds")
+        except urllib.error.URLError as exc:
+            print(f"[LLM DEBUG] llama-server action request failed: {exc}")
+            return MutationOutput(
+                code=code,
+                summary=f"llama-server unavailable ({exc}); original code preserved.",
+                expected_improvement="",
+                provider="llama-server-error",
+            )
+
+        try:
+            data = json.loads(raw)
+            print("[LLM DEBUG] Raw llama-server action mode: JSON:", data)
+        except json.JSONDecodeError:
+            print("[LLM DEBUG] llama-server action mode returned non-JSON output")
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned invalid JSON; original code preserved.",
+                expected_improvement="",
+                provider="llama-server-error",
+            )
+
+        text = str(data.get("content", "")).strip()
+        print(f"[LLM DEBUG] Raw llama-server action output: {text}")
+
+        action = extract_llama_action(text)
+
+        if action is None:
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned no valid action; original code preserved.",
+                expected_improvement="",
+                provider=self.provider,
+            )
+        
+        #epsilon-greedy exploration
+        exploration_used = False
+        epsilon = 0.2
+        if random.random() < epsilon:
+            action = random.choice(["eat_food", "run_away", "wait", "move_randomly"])
+            exploration_used = True
+            print(f"[LLM DEBUG] Epsilon exploration triggered, sampled action: {action}")
+
+        mutated = wrap_action_as_pacman_agent(action)
+        print("[LLM DEBUG] Original code passed into mutate_action:")
+        print(code)
+        print("[LLM DEBUG] Wrapped mutated code:")
+        print(mutated)
+        print("[LLM DEBUG] Equality check:", mutated.strip() == code.strip())
+        if mutated.strip() == code.strip():
+            return MutationOutput(
+                code=code,
+                summary="llama-server returned unchanged action; original code preserved.",
+                expected_improvement="",
+                provider=self.provider,
+            )
+
+        return MutationOutput(
+            code=mutated,
+            summary=(
+                f'Local llama-server action mutation applied: "{action}"'
+                if not exploration_used
+                else f'Epsilon exploration applied: "{action}"'
+            ),
+            expected_improvement="Local server selected a guided Pacman action.",
+            provider=self.provider,
+        )
+
     
 
 class LLMMutator:
@@ -350,3 +598,31 @@ class LLMMutator:
                     expected_improvement=fallback.expected_improvement,
                     provider="heuristic-fallback",
                 )
+    def mutate_action(self, code: str, problem_description: str = "") -> MutationOutput:
+        provider = (self.settings.provider or "heuristic").lower()
+        print(f"[LLM DEBUG] Requested provider for action mutation: {provider}")
+
+        if provider in {"", "heuristic", "offline", "none"}:
+            return self.fallback.mutate(code, problem_description, "python")
+
+        if provider in {"llama", "llama-server"}:
+            print("[LLM DEBUG] Using LLAMA.CPP action mutator")
+            try:
+                mutator = LlamaServerMutator(self.settings)
+                return mutator.mutate_action(code, problem_description)
+            except Exception as exc:
+                print(f"[LLM DEBUG] Llama action mode failed → fallback triggered: {exc}")
+                fallback = self.fallback.mutate(code, problem_description, "python")
+                return MutationOutput(
+                    code=fallback.code,
+                    summary=f"Llama action mode unavailable ({exc}); used heuristic fallback. {fallback.summary}",
+                    expected_improvement=fallback.expected_improvement,
+                    provider="heuristic-fallback",
+                )
+
+        return MutationOutput(
+            code=code,
+            summary=f"Unsupported provider '{provider}'; original code preserved.",
+            expected_improvement="",
+            provider="provider-error",
+        )

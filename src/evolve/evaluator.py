@@ -25,6 +25,12 @@ class Evaluator(Protocol):
     def evaluate(self, candidate: CandidateProgram) -> EvaluationMetrics:
         ...
 
+def extract_action_from_code(code: str) -> str | None:
+    actions = ["eat_food", "run_away", "wait", "move_randomly"]
+    for action in actions:
+        if f'return "{action}"' in code or f"return '{action}'" in code:
+            return action
+    return None
 
 class DeterministicStubPacmanEvaluator:
     """
@@ -56,6 +62,8 @@ class DeterministicStubPacmanEvaluator:
 
         lowered = code.lower()
 
+        action = extract_action_from_code(code)
+
         # Structural signals
         if_count = lowered.count("if ")
         elif_count = lowered.count("elif ")
@@ -66,6 +74,26 @@ class DeterministicStubPacmanEvaluator:
         state_refs = lowered.count("state")
         comment_count = sum(1 for line in lines if line.strip().startswith("#"))
 
+        action_score_bonus = 0
+        action_survival_bonus = 0.0
+        action_step_adjustment = 0
+
+        if action == "eat_food":
+            action_score_bonus = 60
+            action_survival_bonus = 2.0
+            action_step_adjustment = -8
+        elif action == "run_away":
+            action_score_bonus = 40
+            action_survival_bonus = 4.0
+            action_step_adjustment = -5
+        elif action == "wait":
+            action_score_bonus = 10
+            action_survival_bonus = 1.0
+            action_step_adjustment = 0
+        elif action == "move_randomly":
+            action_score_bonus = 5
+            action_survival_bonus = 0.5
+            action_step_adjustment = 5
         # Deterministic content hash
         digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
         hash_value = int(digest[:8], 16)
@@ -88,6 +116,7 @@ class DeterministicStubPacmanEvaluator:
             + (food_refs * 20)
             + (state_refs * 8)
             + hash_score_bonus
+            + action_score_bonus
         )
 
         # Survival time:
@@ -101,6 +130,7 @@ class DeterministicStubPacmanEvaluator:
             + (ghost_refs * 1.25)
             + (state_refs * 0.2)
             + hash_survival_bonus
+            + action_survival_bonus
         )
 
         # Steps:
@@ -111,12 +141,16 @@ class DeterministicStubPacmanEvaluator:
             + (char_count // 18)
             + (comment_count * 2)
             + hash_step_penalty
+            + action_step_adjustment
         )
-
+        
         # Keep values in a reasonable prototype range
         score = float(max(0, score))
         survival_time = float(max(0.0, survival_time))
         steps = float(max(1, steps))
+
+        #EVAL DEBUG
+        print(f"[EVAL DEBUG] action={action}, score={score}, survival={survival_time}, steps={steps}")
 
         return EvaluationMetrics(
             score=score,

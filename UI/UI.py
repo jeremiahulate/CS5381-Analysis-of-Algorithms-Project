@@ -4,6 +4,12 @@ import time
 from pathlib import Path
 import pandas as pd
 import streamlit as st
+import os
+import warnings
+
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+warnings.filterwarnings("ignore")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -12,7 +18,8 @@ from src.evolve.engine import run_evolution
 from src.evolve.evaluator import DeterministicStubPacmanEvaluator
 from src.evolve.fitness import FitnessWeights
 from src.evolve.generator import LLMSettings
-from src.retrieval.faiss_retriever import FaissRetriever, RetrievedExample
+from src.retrieval.faiss_retriever import FaissRetriever
+from src.retrieval.knowledge_loader import load_knowledge_documents
 
 st.set_page_config(page_title="gradient color", layout="wide")
 
@@ -78,20 +85,20 @@ def run_backend_evolution(
         provider=provider_map.get(api_provider, "heuristic"),
     )
     
-    knowledge_docs = [
-    "If a ghost is nearby, prioritize survival and move away.",
-    "When safe, prioritize food collection to improve score.",
-    "Shorter paths can reduce step cost and improve fitness.",
-    "Balance score, survival time, and movement efficiency.",
-    ]
-    retriever = FaissRetriever(knowledge_docs)
+    knowledge_docs = load_knowledge_documents(
+        "Data/knowledge",
+        include_files=["pacman_strategies.txt", "heuristics.txt"],)
+    
+    print(f"[KNOWLEDGE DEBUG] Loaded {len(knowledge_docs)} knowledge chunks from Data/knowledge")
+
+    retriever = FaissRetriever([doc.text for doc in knowledge_docs])
     
     # UI DEBUG
     print(
         f"[UI DEBUG] api_provider={api_provider}, "
         f"mapped_provider={llm_settings.provider}, "
     )
-    
+
     result = run_evolution(
         initial_code=initial_code,
         evaluator=evaluator,
@@ -106,6 +113,7 @@ def run_backend_evolution(
         llm_settings=llm_settings,
         retriever=retriever,
         retrieval_top_k=1,
+        knowledge_docs=knowledge_docs,
     )
 
     return result
@@ -174,24 +182,61 @@ if "best_metrics" not in st.session_state:
 
 
 with st.sidebar:
-    st.subheader("API Setup (optional)")
+    st.subheader("Provider Settings")
 
     st.session_state["api_provider"] = st.selectbox(
         "Provider",
-        ["Heuristic (Offline)", "Llama (local)", "Rag (FAISS-guided)"],
-        index=["Heuristic (Offline)",  "Llama (local)", "Rag (FAISS-guided)"].index(st.session_state["api_provider"])
-        if st.session_state["api_provider"] in ["Heuristic (Offline)", "Llama (local)", "Rag (FAISS-guided)"]
+        ["Heuristic (Offline)", "Llama (local)"],
+        index=["Heuristic (Offline)",  "Llama (local)"].index(st.session_state["api_provider"])
+        if st.session_state["api_provider"] in ["Heuristic (Offline)", "Llama (local)"]
         else 0,
         disabled=st.session_state["evolution_running"],
     )
 
     if st.session_state["api_provider"] == "Llama (local)":
         st.caption("Make sure llama-server is running locally at http://127.0.0.1:8080")
-    elif st.session_state["api_provider"] == "Rag (FAISS-guided)":
-        st.caption("RAG mode uses FAISS for context retrieval.")
     else:
         st.caption("Heuristic mode runs fully offline without the local LLM server.")
 
+    st.markdown("---")
+    st.subheader("Mutation Settings")
+
+    mutation_mode = st.selectbox(
+        "Choose mutation mode",
+        ["none", "random", "llm", "rag"],
+        help="none  = baseline, random = valid random action mutation, llm = model-guided mutation, rag = FAISS-guided retrieval mutation",
+        disabled=st.session_state["evolution_running"],
+    )
+
+    st.markdown("---")
+    st.subheader("Evolution Settings")
+
+    population_size = st.number_input(
+        "Population size",
+        min_value=1,
+        max_value=20,
+        value=4,
+        step=1,
+        disabled=st.session_state["evolution_running"],
+    )
+
+    selection_k = st.number_input(
+        "Top-K Selection",
+        min_value=1,
+        max_value=int(population_size),
+        value=min(2, int(population_size)),
+        step=1,
+        disabled=st.session_state["evolution_running"],
+    )
+
+    target_generations = st.number_input(
+        "Number of Generations",
+        min_value=1,
+        max_value=2000,
+        value=50,
+        step=1,
+        disabled=st.session_state["evolution_running"],
+    )
 
 st.markdown('<h1 class="top-center">Welcome to AlgoChat</h1>', unsafe_allow_html=True)
 st.markdown('<p class="top-center">CS5381 Algorithm Assistant</p>', unsafe_allow_html=True)
@@ -231,34 +276,6 @@ st.session_state["initial_code"] = st.text_area(
 
 code_ok = bool(st.session_state["initial_code"].strip())
 
-st.markdown("## Mutation Mode")
-mutation_mode = st.selectbox(
-    "Choose mutation mode",
-    ["none", "random", "llm", "rag"],
-    help="none = baseline, random = safe mutation, llm = model-guided mutation, rag = FAISS-guided retrieval mutation",
-    disabled=st.session_state["evolution_running"],
-)
-
-st.markdown("## Evolution Settings")
-
-population_size = st.number_input(
-    "Population size",
-    min_value=1,
-    max_value=20,
-    value=4,
-    step=1,
-    disabled=st.session_state["evolution_running"],
-)
-
-selection_k = st.number_input(
-    "Top-K Selection",
-    min_value=1,
-    max_value=int(population_size),
-    value=min(2, int(population_size)),
-    step=1,
-    disabled=st.session_state["evolution_running"],
-)
-
 st.markdown("## Fitness Weights (must sum to 1)")
 w_col1, w_col2, w_col3 = st.columns(3)
 with w_col1:
@@ -296,15 +313,6 @@ elif not desc_ok:
     st.info("No algorithm description provided. Running with code only.")
 
 st.markdown("## Evolution Status")
-
-target_generations = st.number_input(
-    "Number of generations to run (iterations)",
-    min_value=1,
-    max_value=2000,
-    value=50,
-    step=1,
-    disabled=st.session_state["evolution_running"],
-)
 
 dash_status = st.empty()
 dash_metrics = st.empty()

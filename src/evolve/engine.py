@@ -12,7 +12,7 @@ from src.evolve.generator import LLMSettings, LLMMutator
 
 MutationMode = Literal["none", "random", "llm", "rag"]
 
-
+print("[DEBUG] LOADED engine.py NEW VERSION")
 @dataclass(frozen=True)
 class EvaluatedCandidate:
     candidate: CandidateProgram
@@ -40,6 +40,60 @@ class EvolutionRunResult:
     history: List[GenerationSummary]
     best_overall: EvaluatedCandidate
 
+#cleanup function for LLM
+def clean_llm_code_output(text: str) -> str:
+    text = text.strip()
+
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            cleaned = part.strip()
+            if cleaned.startswith("python"):
+                cleaned = cleaned[len("python"):].strip()
+            if "def pacman_agent" in cleaned:
+                text = cleaned
+                break
+
+    lines = text.splitlines()
+
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("def pacman_agent"):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        return text
+
+    cleaned_lines = [lines[start_idx].rstrip()]
+    base_indent = None
+
+    for line in lines[start_idx + 1:]:
+        stripped = line.strip()
+
+        if not stripped:
+            cleaned_lines.append("")
+            continue
+
+        current_indent = len(line) - len(line.lstrip())
+
+        if base_indent is None:
+            if current_indent == 0:
+                break
+            base_indent = current_indent
+            cleaned_lines.append(line.rstrip())
+            continue
+
+        if current_indent < base_indent:
+            break
+
+        if stripped.startswith(("Return ", "Do not ", "The function ", "Mutated code:", "Original code:")):
+            break
+
+        cleaned_lines.append(line.rstrip())
+
+    return "\n".join(cleaned_lines).strip()
+
 #function to check if mutated code is valid Python syntax to avoid 
 # introducing syntax errors during random mutations
 def is_valid_python(code: str) -> bool:
@@ -48,7 +102,6 @@ def is_valid_python(code: str) -> bool:
         return True
     except SyntaxError:
         return False
-
 
 #mutation that appends a comment to the end of the code to introduce 
 #variation without breaking syntax
@@ -101,26 +154,29 @@ def mutate_insert_line(code: str, rng: random.Random) -> str:
 
 #random mutation that tries multiple strategies and falls back to a safe comment mutation if needed
 def random_mutation(code: str, rng: random.Random, language: str = "python") -> tuple[str, str]:
-    mutation_functions = [
-        (mutate_add_comment, "Added a safe comment mutation"),
-        (mutate_replace_literal, "Replaced one known strategy token/literal"),
-        (mutate_insert_line, "Inserted a safe line"),
-    ]
+    actions = ["eat_food", "run_away", "wait", "move_randomly"]
 
-    original = code
-    attempts = 5
+    if language.lower() != "python":
+        return code, "Random mutation skipped for unsupported language"
 
-    for _ in range(attempts):
-        mutator, summary = rng.choice(mutation_functions)
-        mutated = mutator(original, rng)
+    mode = rng.choice(["simple", "conditional"])
 
-        if language.lower() == "python":
-            if is_valid_python(mutated):
-                return mutated, summary
-        else:
-            return mutated, summary
+    if mode == "simple":
+        action = rng.choice(actions)
+        mutated = f'''def pacman_agent(state):
+    return "{action}"
+'''
+        return mutated, f'Random action mutation applied: "{action}"'
 
-    return mutate_add_comment(original, rng), "Applied fallback comment mutation"
+    safe_action = rng.choice(["eat_food", "wait", "move_randomly"])
+    danger_action = rng.choice(["run_away", "wait"])
+
+    mutated = f'''def pacman_agent(state):
+    if getattr(state, "isGhostNearby", lambda: False)():
+        return "{danger_action}"
+    return "{safe_action}"
+'''
+    return mutated, f'Random conditional mutation applied: danger="{danger_action}", safe="{safe_action}"'
 
 #rag guided mutation
 def rag_guided_mutation(
@@ -168,10 +224,11 @@ def rag_guided_mutation(
     print(f"[RAG DEBUG] ghost_hits={ghost_hits}, food_hits={food_hits}")
     
     if has_ghost and has_food:
-        new_code = '''def pacman_agent(state):
-        if state.isGhostNearby():
-            return "run_away"
-        return "eat_food"
+        new_code = '''
+        def pacman_agent(state):
+            if state.isGhostNearby():
+                return "run_away"
+            return "eat_food"
     '''
         return new_code, "Applied RAG-guided ghost avoidance and food-priority mutation"
 
@@ -199,7 +256,8 @@ def generate_candidates(
     problem_description: str = "",
     llm_settings: LLMSettings | None = None,
     retriever=None,
-    retrieval_top_k: int = 3,
+    retrieval_top_k: int = 1,
+    knowledge_docs=None,
 ) -> tuple[List[CandidateProgram], List[str], List[str]]:
     if not parents:
         raise ValueError("At least one parent candidate is required.")
@@ -209,13 +267,15 @@ def generate_candidates(
     operation_summaries: List[str] = []
     operation_providers: List[str] = []
 
-    for _ in range(population_size):
+    for idx in range(population_size):
+        #GEN DEBUG
+        print(f"\n[GEN DEBUG] generation candidate index = {idx}, mutation_mode = {mutation_mode}")
         parent = rng.choice(parents)
 
         if mutation_mode == "none":
             new_code = parent.code
             summary = "No mutation applied; reused parent candidate"
-            provider = "non"
+            provider = "none"
 
         elif mutation_mode == "random":
             new_code, summary = random_mutation(parent.code, rng, parent.language)
@@ -233,27 +293,69 @@ def generate_candidates(
         
         elif mutation_mode == "rag":
             if retriever is None:
-                new_code, summary = random_mutation(parent.code, rng, parent.language)
-                summary = f"RAG fallback (no retriever): {summary}"
-                provider = "rag-fallback"
-            else:
-                query_text = f"{problem_description}\n\n{parent.code}"
-                retrieved = retriever.retrieve(query_text, top_k=retrieval_top_k)
-                retrieved_contexts = [item.text for item in retrieved]
-
-                ##debug print to verify retrieval results
-                print("\n[RAG DEBUG] Retrieved contexts:")
-                for ctx in retrieved_contexts:
-                    print("-", ctx)
-
                 new_code, summary = rag_guided_mutation(
                     parent.code,
                     rng,
-                    retrieved_contexts,
+                    [],
                     parent.language,
                 )
-                provider = "rag"
+                provider = "rag-fallback"
+            else:
+                query_text = f"{problem_description}\n\n{parent.code}"
+                retrieved_items = retriever.retrieve(query_text, top_k=retrieval_top_k)
 
+                #RAG + LLM DEBUG
+                print(f"[GEN DEBUG] Candidate {idx} retrieved {len(retrieved_items)} contexts:")
+                for item in retrieved_items:
+                    source = "unknown"
+                    if knowledge_docs is not None and 0 <= item.index < len(knowledge_docs):
+                        source = knowledge_docs[item.index].source
+                    print(f"[SOURCE: {source}]")
+                    print("-", item.text)
+
+                retrieved_contexts = [item.text for item in retrieved_items]
+
+                retrieved_context_block = "\n".join(
+                    f"- {ctx}" for ctx in retrieved_contexts
+                )
+
+                rag_problem_description = (
+                    f"User goal: {problem_description.strip()}\n"
+                    f"Retrieved guidance: {retrieved_context_block}\n"
+                    'Prefer "eat_food" when safe. Choose "run_away" only if danger is the dominant concern.\n'
+                )
+
+                mutation_output = llm_mutator.mutate_action(
+                    code=parent.code,
+                    problem_description=rag_problem_description,
+                )
+                #RAG+LLM DEBUG
+                print("\n[RAG+LLM ACTION DEBUG] Raw mutation output code:")
+                print(mutation_output.code)
+                #RAG+LLM DEBUG
+                print("\n[RAG+LLM ACTION DEBUG] Raw mutation summary:")
+                print(mutation_output.summary)
+
+                new_code = mutation_output.code
+
+                summary = (
+                    #RAG+LLM DEBUG
+                    f"RAG+LLM action mutation: {mutation_output.summary} | "
+                    f"Retrieved {len(retrieved_contexts)} context(s)"
+                )
+                provider = f"{mutation_output.provider}+rag"
+
+                if parent.language.lower() == "python" and not is_valid_python(new_code):
+                    #RAG+LLM DEBUG
+                    print("[RAG+LLM DEBUG] Invalid Python from LLM, using rule-based RAG fallback")
+                    new_code, fallback_summary = rag_guided_mutation(
+                        parent.code,
+                        rng,
+                        retrieved_contexts,
+                        parent.language,
+                    )
+                    summary = f"RAG+LLM mutation invalid; used rule-based RAG fallback ({fallback_summary})"
+                    provider = f"{provider}-fallback"
         else:
             raise ValueError(f"Unsupported mutation mode: {mutation_mode}")
 
@@ -328,7 +430,8 @@ def run_evolution(
     problem_description: str = "",
     llm_settings: LLMSettings | None = None,
     retriever=None,
-    retrieval_top_k: int = 3,
+    retrieval_top_k: int = 1,
+    knowledge_docs=None,
 ) -> EvolutionRunResult:
     if generations < 1:
         raise ValueError("generations must be at least 1")
@@ -361,6 +464,7 @@ def run_evolution(
             llm_settings=llm_settings,
             retriever=retriever,
             retrieval_top_k=retrieval_top_k,
+            knowledge_docs=knowledge_docs,
         )
 
         evaluated = evaluate_population(
