@@ -12,7 +12,6 @@ from src.evolve.generator import LLMSettings, LLMMutator
 
 MutationMode = Literal["none", "random", "llm"]
 
-print("[DEBUG] LOADED engine.py NEW VERSION")
 @dataclass(frozen=True)
 class EvaluatedCandidate:
     candidate: CandidateProgram
@@ -223,9 +222,6 @@ def rag_guided_mutation(
     has_ghost = ghost_hits >= 2
     has_food = food_hits >= 1
     
-    #RAG debug
-    print(f"[RAG DEBUG] ghost_hits={ghost_hits}, food_hits={food_hits}")
-    
     if has_ghost and has_food:
         new_code = '''
         def pacman_agent(state):
@@ -271,8 +267,6 @@ def generate_candidates(
     operation_providers: List[str] = []
 
     for idx in range(population_size):
-        #GEN DEBUG
-        print(f"\n[GEN DEBUG] generation candidate index = {idx}, mutation_mode = {mutation_mode}")
         parent = rng.choice(parents)
 
         if mutation_mode == "none":
@@ -297,8 +291,6 @@ def generate_candidates(
                 query_text = f"{problem_description}\n\n{parent.code}"
                 retrieved_items = retriever.retrieve(query_text, top_k=retrieval_top_k)
 
-                #RAG + LLM DEBUG
-                print(f"[GEN DEBUG] Candidate {idx} retrieved {len(retrieved_items)} contexts:")
                 for item in retrieved_items:
                     source = "unknown"
                     if knowledge_docs is not None and 0 <= item.index < len(knowledge_docs):
@@ -324,27 +316,18 @@ def generate_candidates(
                     code=parent.code,
                     problem_description=rag_problem_description,
                 )
-                #RAG+LLM DEBUG
-                print("\n[RAG+LLM ACTION DEBUG] Raw mutation output code:")
-                print(mutation_output.code)
-                #RAG+LLM DEBUG
-                print("\n[RAG+LLM ACTION DEBUG] Raw mutation summary:")
-                print(mutation_output.summary)
 
                 new_code = mutation_output.code
                 if "fallback" in mutation_output.summary.lower():
                     summary = f"RAG-guided fallback mutation: {mutation_output.summary}"
                 else:
-                    summary = (
-                        #RAG+LLM DEBUG
+                    summary =(
                         f"RAG+LLM action mutation: {mutation_output.summary} | "
                         f"Retrieved {len(retrieved_contexts)} context(s)"
                     )
                 provider = f"{mutation_output.provider}+rag"
 
                 if parent.language.lower() == "python" and not is_valid_python(new_code):
-                    #RAG+LLM DEBUG
-                    print("[RAG+LLM DEBUG] Invalid Python from LLM, using rule-based RAG fallback")
                     new_code, fallback_summary = rag_guided_mutation(
                         parent.code,
                         rng,

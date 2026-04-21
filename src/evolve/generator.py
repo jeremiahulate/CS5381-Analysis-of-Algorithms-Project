@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Any
 from pathlib import Path
 
-print("[DEBUG] LOADED generator.py NEW VERSION")
 VALID_ACTIONS = ["eat_food","run_away","wait","move_randomly"]
 @dataclass(frozen=True)
 class MutationOutput:
@@ -353,19 +352,12 @@ Current code:
             method="POST",
         )
 
-        #LLM DEBUG
-        print(f"[LLM DEBUG] Calling llama-server at {self.base_url}/completion")
-
         try:
             start = time.perf_counter()
             with urllib.request.urlopen(req, timeout=60) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             elapsed = time.perf_counter() - start
-            #LLM DEBUG
-            print(f"[LLM DEBUG] llama-server responded in {elapsed:.2f} seconds")
         except urllib.error.URLError as exc:
-            #LLM DEBUG
-            print(f"[LLM DEBUG] llama-server request failed: {exc}")
             return MutationOutput(
                 code=code,
                 summary=f"llama-server unavailable ({exc}); original code preserved.",
@@ -375,11 +367,7 @@ Current code:
 
         try:
             data = json.loads(raw)
-            #LLM DEBUG
-            print("[LLM DEBUG] Raw llama-server action: JSON:", data)
         except json.JSONDecodeError:
-            #LLM DEBUG
-            print("[LLM DEBUG] llama-server returned non-JSON output")
             return MutationOutput(
                 code=code,
                 summary="llama-server returned invalid JSON; original code preserved.",
@@ -388,8 +376,6 @@ Current code:
             )
 
         text = str(data.get("content", "")).strip()
-        #LLM DEBUG
-        print(f"[LLM DEBUG] Raw llama-server output: {text}")
         mutated = extract_llama_code(text, original_code=code)
 
         if not mutated.strip():
@@ -403,14 +389,7 @@ Current code:
         if language.lower() == "python":
             cleaned_mutated = clean_llm_code_output(mutated)
 
-            print("\n[LLM DEBUG] Raw llama-server output:")
-            print(mutated)
-            print("\n[LLM DEBUG] Cleaned llama-server output:")
-            print(cleaned_mutated)
-
             if not is_valid_python(cleaned_mutated):
-                #LLM DEBUG
-                print("[LLM DEBUG] Returning invalid-Python fallback from llama-server mutator")
                 return MutationOutput(
                     code=code,
                     summary="llama-server returned invalid Python after cleanup; original code preserved.",
@@ -436,9 +415,7 @@ Current code:
                     provider=self.provider,
                 )
             
-        print("[LLM DEBUG] Returning successful MutationOutput from llama-server mutator")
         return MutationOutput(
-            #LLM DEBUG
             code=mutated,
             summary="Local llama-server mutation applied.",
             expected_improvement="Local server suggested a small targeted refinement.",
@@ -478,16 +455,12 @@ Answer with one word only:
             method="POST",
         )
 
-        print(f"[LLM DEBUG] Calling llama-server action mode at {self.base_url}/completion")
-
         try:
             start = time.perf_counter()
             with urllib.request.urlopen(req, timeout=60) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             elapsed = time.perf_counter() - start
-            print(f"[LLM DEBUG] llama-server action mode responded in {elapsed:.2f} seconds")
         except urllib.error.URLError as exc:
-            print(f"[LLM DEBUG] llama-server action request failed: {exc}")
             return MutationOutput(
                 code=code,
                 summary=f"llama-server unavailable ({exc}); original code preserved.",
@@ -497,9 +470,7 @@ Answer with one word only:
 
         try:
             data = json.loads(raw)
-            print("[LLM DEBUG] Raw llama-server action mode: JSON:", data)
         except json.JSONDecodeError:
-            print("[LLM DEBUG] llama-server action mode returned non-JSON output")
             return MutationOutput(
                 code=code,
                 summary="llama-server returned invalid JSON; original code preserved.",
@@ -508,7 +479,6 @@ Answer with one word only:
             )
 
         text = str(data.get("content", "")).strip()
-        print(f"[LLM DEBUG] Raw llama-server action output: {text}")
 
         #epsilon-greedy exploration
         exploration_used = False
@@ -517,7 +487,6 @@ Answer with one word only:
         if random.random() < epsilon:
             action = random.choice(VALID_ACTIONS)
             exploration_used = True
-            print(f"[LLM DEBUG] Epsilon exploration triggered, sampled action: {action}")
         else:
             #try LLM output
             action = extract_llama_action(text)
@@ -526,22 +495,15 @@ Answer with one word only:
             if action is None:
                 action = random.choice(VALID_ACTIONS)
                 exploration_used = True
-                print(f"[LLM DEBUG] Invalid LLM -> fallback action: {action}")
 
         #new ghost branch mutation
         if random.random() < 0.3:
             ghost_action = random.choice(["run_away", "wait"])
         else:
             ghost_action = "run_away"
-        
-        print(f"[LLM DEBUG] Selected ghost_action: {ghost_action}")
 
         mutated = wrap_action_as_pacman_agent(action, ghost_action)
-        print("[LLM DEBUG] Original code passed into mutate_action:")
-        print(code)
-        print("[LLM DEBUG] Wrapped mutated code:")
-        print(mutated)
-        print("[LLM DEBUG] Equality check:", mutated.strip() == code.strip())
+
         if mutated.strip() == code.strip():
             return MutationOutput(
                 code=code,
@@ -551,7 +513,6 @@ Answer with one word only:
             )
         
         if not is_valid_pacman_agent(mutated) or not has_valid_pacman_actions(mutated):
-            print("[LLM DEBUG] Invalid generated agent, reverting to original")
             return MutationOutput(
                 code=code,
                 summary="Invalid generated agent; original preserved.",
@@ -579,23 +540,15 @@ class LLMMutator:
 
     def mutate(self, code: str, problem_description: str = "", language: str = "python") -> MutationOutput:
         provider = (self.settings.provider or "heuristic").lower()
-        #LLMDEBUG
-        print(f"[LLM DEBUG] Requested provider: {provider}")
 
         if provider in {"", "heuristic", "offline", "none"}:
-            #LLM DEBUG
-            print("[LLM DEBUG] Using HEURISTIC mutator")
             return self.fallback.mutate(code, problem_description, language)
 
         if provider == "llama":
-            #LLM DEBUG
-            print("[LLM DEBUG] Using LLAMA.CPP mutator")
             try:
                 mutator = LlamaServerMutator(self.settings)
                 return mutator.mutate(code, problem_description, language)
             except Exception as exc:
-                #LLM DEBUG
-                print(f"[LLM DEBUG] Llama failed → fallback triggered: {exc}")
                 fallback = self.fallback.mutate(code, problem_description, language)
                 return MutationOutput(
                     code=fallback.code,
@@ -605,18 +558,15 @@ class LLMMutator:
                 )
     def mutate_action(self, code: str, problem_description: str = "") -> MutationOutput:
         provider = (self.settings.provider or "heuristic").lower()
-        print(f"[LLM DEBUG] Requested provider for action mutation: {provider}")
 
         if provider in {"", "heuristic", "offline", "none"}:
             return self.fallback.mutate(code, problem_description, "python")
 
         if provider in {"llama", "llama-server"}:
-            print("[LLM DEBUG] Using LLAMA.CPP action mutator")
             try:
                 mutator = LlamaServerMutator(self.settings)
                 return mutator.mutate_action(code, problem_description)
             except Exception as exc:
-                print(f"[LLM DEBUG] Llama action mode failed → fallback triggered: {exc}")
                 fallback = self.fallback.mutate(code, problem_description, "python")
                 return MutationOutput(
                     code=fallback.code,

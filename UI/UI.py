@@ -87,16 +87,8 @@ def run_backend_evolution(
     knowledge_docs = load_knowledge_documents(
         "Data/knowledge",
         include_files=["pacman_strategies.txt", "heuristics.txt"],)
-    
-    print(f"[KNOWLEDGE DEBUG] Loaded {len(knowledge_docs)} knowledge chunks from Data/knowledge")
 
     retriever = FaissRetriever([doc.text for doc in knowledge_docs])
-    
-    # UI DEBUG
-    print(
-        f"[UI DEBUG] api_provider={api_provider}, "
-        f"mapped_provider={llm_settings.provider}, "
-    )
 
     result = run_evolution(
         initial_code=initial_code,

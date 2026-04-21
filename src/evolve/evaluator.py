@@ -167,9 +167,6 @@ class DeterministicStubPacmanEvaluator:
         survival_time = float(max(0.0, survival_time))
         steps = float(max(1, steps))
 
-        #EVAL DEBUG
-        print(f"[EVAL DEBUG] default_action={default_action}, score={score}, survival={survival_time}, steps={steps}")
-
         return EvaluationMetrics(
             score=score,
             survival_time=survival_time,
