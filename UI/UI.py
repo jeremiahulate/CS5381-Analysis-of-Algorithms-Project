@@ -76,9 +76,8 @@ def run_backend_evolution(
     )
 
     provider_map = {
-        "Heuristic": "heuristic",
+        "Heuristic (Offline)": "heuristic",
         "Llama (local)": "llama",
-        "Rag (FAISS-guided)": "rag",
     }
 
     llm_settings = LLMSettings(
@@ -132,6 +131,7 @@ def history_to_dataframe(history):
                 "best_steps": item.best_steps,
                 "mutation_mode": item.mutation_mode,
                 "provider": item.provider,
+                "top_k_fitnesses": item.top_k_fitnesses,
             }
         )
     return pd.DataFrame(rows)
@@ -203,8 +203,8 @@ with st.sidebar:
 
     mutation_mode = st.selectbox(
         "Choose mutation mode",
-        ["none", "random", "llm", "rag"],
-        help="none  = baseline, random = valid random action mutation, llm = model-guided mutation, rag = FAISS-guided retrieval mutation",
+        ["none", "random", "llm"],
+        help="none  = baseline, random = valid random action mutation, llm = RAG-guided local LLM mutation",
         disabled=st.session_state["evolution_running"],
     )
 
@@ -379,7 +379,7 @@ if start_btn:
         selection_k=int(selection_k),
         problem_description=(
     st.session_state["problem_description"].strip()
-    or "Improve the given code conservatively."
+    or "Improve Pacman by prioritizing food collection when safe and avoiding danger when necessary."
 ),
         api_provider=st.session_state["api_provider"],
     )
@@ -445,11 +445,17 @@ if st.session_state["history"]:
             st.write("**Best Code at this Generation:**")
             st.code(item.best_code, language=st.session_state["code_language"])
 
+            if item.top_k_fitnesses and item.top_k_codes:
+                st.write("**Top-K retained candidates:**")
+                for rank, (fit, code_text) in enumerate(zip(item.top_k_fitnesses, item.top_k_codes), start=1):
+                    st.write(f"**Rank {rank} Fitness:** `{fit:.3f}`")
+                    st.code(code_text, language=st.session_state["code_language"])
+
 if st.session_state["best_solution"].strip():
     bm = st.session_state["best_metrics"] 
     st.write(
         f"**Best Fitness:** `{st.session_state['best_fitness']:.3f}`  \n"
-        f"**Runtime:** '{st.session_state['runtime_timeseconds']:.2f}' seconds' \n"
+        f"**Runtime:** `{st.session_state['runtime_timeseconds']:.2f} seconds` \n"
         f"**Raw Metrics:** score=`{bm['score']:.0f}`, survival_time=`{bm['survival_time']:.2f}`, steps=`{bm['steps']:.0f}`"
     )
     st.code(st.session_state["best_solution"], language=st.session_state["code_language"])

@@ -48,7 +48,7 @@ def load_knowledge_documents(
             continue
 
         text = path.read_text(encoding="utf-8", errors="ignore")
-        documents.extend(chunk_text(text, chunk_size=200, overlap=40))
+        chunks = chunk_text(text, chunk_size=200, overlap=40)
 
         for chunk in chunks:
             documents.append(

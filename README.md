@@ -1,12 +1,14 @@
 # CS5381 Evolutionary Algorithm Agent (AlgoChat)
 
-This project implements a simplified evolutionary agent inspired by **AlphaEvolve**, designed to iteratively improve code or algorithmic solutions using fitness-based evaluation and mutation strategies.
+This project implements a simplified evolutionary agent inspired by **AlphaEvolve**, designed to iteratively improve code or algorithmic solutions using fitness-based evaluation, mutation, and top-k selection.
 
-The system integrates:
+The system focuses on the **Pacman use case** and combines:
 - Evolutionary algorithms
-- Local LLM-guided mutation (llama.cpp server)
-- FAISS + SBERT (vector database)
+- Local LLM-guided mutation with **llama.cpp**
+- **RAG-guided mutations** using **FAISS + SBERT**
+- Top-k selection across generations
 - A Streamlit-based UI
+- Automatic CSV export of run history
 
 ---
 
@@ -17,51 +19,72 @@ The system integrates:
 - Supports multiple mutation modes:
   - `none` → baseline (no change)
   - `random` → rule-based mutation
-  - `llm` → LLM-guided mutation (local)
-- Top-k selection strategy
-- Tracks best candidate across generations
+  - `llm` → **RAG-guided local mutation**
+- Uses **top-k selection**
+- Tracks the best candidate across generations
+- Preserves valid candidates when LLM output is invalid or unchanged
 
 Core implementation:
 - `src/evolve/engine.py`
 
 ---
 
-## LLM Mutation (Local - llama.cpp Server)
+## Local + RAG LLM Mutation 
 
-The system uses a **locally hosted LLM via llama.cpp (`llama-server`)**:
+The system uses a **locally hosted LLM via llama.cpp (`llama-server`)** and integrates **retrieval-augmented generation (RAG)** into the mutation loop.
 
-- Runs entirely on the user's machine (no API required)
-- Uses HTTP requests instead of subprocess calls
-- Avoids repeated model loading → improves performance
-- Ensures privacy and offline capability
+### Current LLM Setup
+- Local inference through `llama-server`
+- Model used:
+  - `mistral-7b-instruct-v0.2.Q4_K_M.gguf`
+- No external API required
+- Runs fully on the user’s machine
 
 ### Why llama-server?
-- Faster than `llama-cli` (no reload per generation)
-- Required for iterative evolutionary loops
-- Supports scalable mutation generation
+- Avoids reloading the model on every mutation
+- Faster for iterative evolutionary loops than `llama-cli`
+- Supports local and private experimentation
 
-### Mutation Constraints (IMPORTANT)
+### RAG Integration
+The `llm` mutation mode is not plain LLM-only mutation. It is:
 
-To ensure valid outputs, the system enforces:
+- SBERT embedding of the current prompt/code context
+- FAISS retrieval of relevant local knowledge documents
+- Retrieved guidance injected into the mutation prompt
+- Local LLM mutation using the retrieved context
 
-- Must return exactly one function:
-  
-  def pacman_agent(state):
+This means the current `llm` mode is effectively:
+- **RAG + LLM mutation**
 
-- No helper functions allowed
-- Must return valid actions only:
-  - "run_away"
-  - "eat_food"
-  - "wait"
+Files:
+- `src/retrieval/faiss_retriever.py`
+- `src/retrieval/knowledge_loader.py`
+- `src/evolve/generator.py`
+
+---
+
+## Mutation Design
+
+### Supported Mutation Modes
+- `none`
+  - Reuses the parent candidate
+  - Used as the baseline condition
+- `random`
+  - Applies structured random mutation
+  - Can mutate simple or conditional Pacman logic
+- `llm`
+  - Uses **RAG-guided local LLM mutation**
+  - Falls back to safe mutation behavior if the LLM output is invalid
 
 ### Validation Layer
+To keep the system stable, generated code is validated before use:
 
-The system includes strict validation:
+- Python syntax validation (`ast.parse`)
+- Required function validation (`pacman_agent(state)`)
+- Allowed-action validation
+- Fallback preservation when invalid or unchanged output is detected
 
-- Syntax validation (`ast.parse`)
-- Function structure validation
-- Domain-specific validation (allowed actions)
-- Rejects invalid or malformed LLM outputs
+This prevents crashes and keeps the evolutionary loop running even when the local model produces malformed outputs.
 
 File:
 - `src/evolve/generator.py`
@@ -71,13 +94,24 @@ File:
 ## Fitness & Evaluation
 
 ### Fitness Function:
-Fitness = w1 * score + w2 * survival_time - w3 * steps
+Fitness is computed as:
 
-- Score → maximize
-- Survival time → maximize
-- Steps → minimize
+`fitness = w1 * score + w2 * survival_time - w3 * steps`
 
-Evaluation uses a **deterministic stub environment**.
+Where:
+- `score` is maximized
+- `survival_time` time is maximized
+- `steps` is minimized as cost
+
+### Evaluator
+The prototype currently uses a **deterministic stub Pacman evaluator**. It does not run the full Pacman game environment, but it scores candidate strategies consistently based on:
+
+- code structure
+- branching logic
+- ghost/default action behavior
+- deterministic hash-based variation
+
+This makes comparisons reproducible across runs.
 
 Files:
 - `src/evolve/fitness.py`
@@ -85,34 +119,94 @@ Files:
 
 ---
 
-## Streamlit UI
+## Selection Strategy
 
-The UI allows users to:
+The system uses **top-k selection**.
 
-- Input **initial code (required)**
-- Input **algorithm description (optional)**
-- Adjust fitness weights
-- Choose mutation mode
-- Set number of generations
+For each generation:
+1. A population of candidates is generated
+2. All candidates are evaluated
+3. Candidates are ranked by fitness
+4. The **top k** candidates are retained as parents for the next generation
 
-### Displays:
-- Best fitness score
-- Best solution
-- Raw metrics (score, survival time, steps)
-- Fitness progression graph
-- CSV export of results
+This allows better diversity than single-best-only selection.
+
+File:
+- `src/evolve/engine.py`
 
 ---
 
-## Vector Database (FAISS + SBERT)
+## Streamlit UI
 
-- Sentence embeddings via SBERT
-- FAISS index for similarity search
-- Designed for future retrieval-augmented mutation
+The Streamlit UI allows users to:
+
+- Input **initial code**
+- Input **algorithm / problem description**
+- Choose mutation mode
+- Set:
+  - number of generations
+  - population size
+  - top-k selection size
+  - fitness weights
+- Run the system with one click
+
+### UI Displays
+- Best fitness score
+- Best raw metrics
+- Runtime
+- Fitness progression across generations
+- Best solution found
+- Per-generation operation summaries
+- Top-k retained candidates for each generation
+- CSV export of evolution history
+
+File:
+- `UI/UI.py`
+
+---
+
+## Vector Database and Knowledge Retrieval
+
+The project uses:
+
+- **Sentence Transformers (SBERT)** for embeddings
+- **FAISS** for vector similarity search
+- Local text knowledge files for mutation guidance
+
+Knowledge is loaded from:
+- `Data/knowledge/`
+
+Examples include:
+- Pacman strategy guidance
+- heuristic references
+
+The retriever returns top-k relevant contexts, which are inserted into the LLM prompt during `llm` mutation mode.
 
 Files:
 - `src/embeddings/sbert.py`
 - `src/vectordb/faiss_store.py`
+
+---
+## System Workflow
+
+### High-Level Evolution Loop
+1. User enters initial code and optional problem description in the UI
+2. The evolution engine generates a population of candidates
+3. Mutation is applied using one of:
+   - none
+   - random
+   - RAG + LLM
+4. Each candidate is evaluated with the fitness function
+5. The top-k candidates are selected
+6. The process repeats for the requested number of generations
+7. Results are displayed in the UI and saved to CSV
+
+### RAG + LLM Workflow
+1. The current code and problem description are embedded
+2. FAISS retrieves relevant local knowledge documents
+3. Retrieved guidance is appended to the mutation prompt
+4. `llama-server` produces an action/code mutation
+5. The mutation is validated before evaluation
 
 ---
 
@@ -140,7 +234,8 @@ UI/
 └── UI.py
 
 Data/
-└── indexes/
+├── knowledge/
+└── evolution_runs/
 
 Tests/
 └── test_*.py
@@ -165,48 +260,36 @@ pip install -e .
 ```
 ---
 
-## Run Local LLM (IMPORTANT)
+## Local LLM Setup
 
-This project uses a **local LLM powered by llama.cpp (`llama-server`)**.  
-You must set this up before using `llm` mutation mode.
-
----
+This project uses a **local LLM served by llama.cpp**.  
 
 ### 1. Download llama.cpp (Prebuilt Binaries)
 
 Download from:  
 https://github.com/ggerganov/llama.cpp/releases
 
-Download the Windows CPU version (example):
-
-- `llama-binaries-win-cpu-x64.zip`
-
 Extract the contents into:
 Models/llama/
 
 
-After extraction, your folder should look like:
+Expected structure:
 
 ```text
 Models/
 └── llama/
-├── llama-server.exe
-├── llama-cli.exe
-├── ggml-cpu-haswell.dll
-└── ...
+    ├── llama-server.exe
+    ├── llama-cli.exe
+    ├── ggml-cpu-haswell.dll
+    └── ...
 ```
 
 ---
 
 ### 2. Download a GGUF Model
 
-Download a small model (recommended for prototype):
-
-https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
-
-Download file:
-
-- `tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`
+Model used in this prototype:
+- mistral-7b-instruct-v0.2.Q4_K_M.gguf
 
 Place it here:
 Models/llama/models/
@@ -215,12 +298,9 @@ Final structure:
 ```text
 Models/
 └── llama/
-├── llama-server.exe
-├── llama-cli.exe
-├── ggml-cpu-haswell.dll
-└── ...
-    └── models/
-        └── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+    └── llama-server.exe
+        └── models/
+            └── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
 ```
 ---
 
@@ -242,58 +322,6 @@ Keep this terminal open while running the UI.
 
 ---
 
-### 4. How the System Uses the LLM
-
-- The UI sends mutation requests to:
-```text
-http://127.0.0.1:8080/completion
-```
-
-- The LLM:
-  - receives the current code and problem description
-  - generates a small mutation
-  - returns updated code
-
-- The system then:
-  - validates the output
-  - evaluates fitness
-  - continues evolution
-
----
-
-### 5. Troubleshooting
-
-**Connection refused**
-- Ensure `llama-server` is running
-
-**Timeout errors**
-- Use a smaller model (TinyLlama)
-- Increase timeout if needed
-
-**Invalid outputs**
-- Expected for small models
-- Automatically handled by validation layer
-
----
-
-### 6. Notes
-
-- Runs entirely locally (no API required)
-- Model files are large → excluded via `.gitignore`
-- TinyLlama is used for speed, not accuracy
-
----
-
-### Optional: Test the Server
-```text
-curl http://127.0.0.1:8080/completion ^
--H "Content-Type: application/json" ^
--d "{"prompt":"hello","n_predict":10}"
-```
-If it returns text, the server is working.
-
----
-
 ## Run UI
 ```text
 streamlit run UI/UI.py
@@ -302,33 +330,58 @@ streamlit run UI/UI.py
 
 ## Experiment Modes
 
-- No Evolution (`none`)
-- Random Mutation (`random`)
-- LLM Mutation (`llm`)
+The current UI supports:
+- `none`
+- `random`
+- `llm`
 
-These allow comparison of:
-- Baseline performance
-- Random improvements
-- LLM-guided improvements
+Where:
+- `none` is the baseline performance
+- `random` is structured random improvements
+- `llm` is Rag-guided local LLM mutation
+
+These three modes are intended for direct comparison in experiments
+
+---
+
+## Output and Saved Results
+
+After execution, the system automatically saves evolution history to CSV in:
+
+```text
+Data/evolution_runs
+```
+
+The UI also allows downloading the CSV directly.
+
+Each run records:
+- generation
+- best generation fitness
+- best so far fitness
+- best raw metrics
+- provider / mutation mode
+- top-k retained candidate fitness value
 
 ---
 
 ## Current Limitations
 
-- Stub evaluator (not real Pacman environment)
-- Small local model (TinyLlama) → limited reasoning ability
-- LLM occasionally produces invalid outputs (handled via validation)
-- FAISS not yet integrated into mutation loop
+- Uses a deterministic stub evaluator rather than full Pacman gameplay
+- Local LLM output can still be conservative or malformed
+- LLM mode may preserve the original candidate instead of always mutating
+- Comparative plotting across multiple CSV runs is performed externally
+- Performance depends on local machine resources and model size
 
 ---
 
 ## Future Work
 
-- Integrate real environment for evaluation
-- FAISS-guided mutation (RAG)
-- Improve mutation diversity
-- Multi-run comparison visualization
-- Performance optimization
+- Integrate a real Pacman environment
+- Improve LLM mutation quality
+- Add multi-run comparison plotting directly into the UI
+- Add diversity tracking and elitism
+- Extend to other algorithms such as matrix multiplication
+- Support richer conditional mutation beyond action-only refinement
 
 ---
 

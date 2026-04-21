@@ -10,7 +10,7 @@ from src.evolve.fitness import FitnessWeights, FitnessResult, compute_fitness
 from src.evolve.generator import LLMSettings, LLMMutator
 
 
-MutationMode = Literal["none", "random", "llm", "rag"]
+MutationMode = Literal["none", "random", "llm"]
 
 print("[DEBUG] LOADED engine.py NEW VERSION")
 @dataclass(frozen=True)
@@ -33,6 +33,9 @@ class GenerationSummary:
     mutation_mode: str
     operation_summary: str = ""
     provider: str = ""
+    top_k_fitnesses: List[float] | None = None
+    top_k_codes: List[str] | None = None
+    top_k_providers: List[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -282,16 +285,6 @@ def generate_candidates(
             provider = "random"
 
         elif mutation_mode == "llm":
-            mutation_output = llm_mutator.mutate(
-                code=parent.code,
-                problem_description=problem_description,
-                language=parent.language,
-            )
-            new_code = mutation_output.code
-            summary = mutation_output.summary
-            provider = mutation_output.provider
-        
-        elif mutation_mode == "rag":
             if retriever is None:
                 new_code, summary = rag_guided_mutation(
                     parent.code,
@@ -322,7 +315,9 @@ def generate_candidates(
                 rag_problem_description = (
                     f"User goal: {problem_description.strip()}\n"
                     f"Retrieved guidance: {retrieved_context_block}\n"
-                    'Prefer "eat_food" when safe. Choose "run_away" only if danger is the dominant concern.\n'
+                    'Prefer "eat_food" when safe. '
+                    'Choose "run_away" only if danger is clearly dominant. '
+                    'Do not choose "move_randomly" unless no better action is supported by the guidance.\n'
                 )
 
                 mutation_output = llm_mutator.mutate_action(
@@ -337,12 +332,14 @@ def generate_candidates(
                 print(mutation_output.summary)
 
                 new_code = mutation_output.code
-
-                summary = (
-                    #RAG+LLM DEBUG
-                    f"RAG+LLM action mutation: {mutation_output.summary} | "
-                    f"Retrieved {len(retrieved_contexts)} context(s)"
-                )
+                if "fallback" in mutation_output.summary.lower():
+                    summary = f"RAG-guided fallback mutation: {mutation_output.summary}"
+                else:
+                    summary = (
+                        #RAG+LLM DEBUG
+                        f"RAG+LLM action mutation: {mutation_output.summary} | "
+                        f"Retrieved {len(retrieved_contexts)} context(s)"
+                    )
                 provider = f"{mutation_output.provider}+rag"
 
                 if parent.language.lower() == "python" and not is_valid_python(new_code):
@@ -495,6 +492,9 @@ def run_evolution(
                 mutation_mode=mutation_mode,
                 operation_summary=best_generation.candidate.description or operation_summaries[0],
                 provider=best_generation.candidate.provider,
+                top_k_fitnesses=[item.fitness_result.fitness for item in selected],
+                top_k_codes=[item.candidate.code for item in selected],
+                top_k_providers=[item.candidate.provider for item in selected],
             )
         )
 

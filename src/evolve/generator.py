@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.request
 import urllib.error
+import re
 import ast
 import json
 import time
@@ -11,6 +12,7 @@ from typing import Any
 from pathlib import Path
 
 print("[DEBUG] LOADED generator.py NEW VERSION")
+VALID_ACTIONS = ["eat_food","run_away","wait","move_randomly"]
 @dataclass(frozen=True)
 class MutationOutput:
     code: str
@@ -189,7 +191,7 @@ def extract_llama_code(output: str, original_code: str) -> str:
             if part_lines and part_lines[0].strip().lower() in {"python", "py"}:
                 part = "\n".join(part_lines[1:])
 
-            extracted = _extract_complete_pacman_function(part, original_code)
+            extracted = extract_complete_pacman_function(part, original_code)
             if extracted != original_code:
                 return extracted
 
@@ -250,29 +252,15 @@ def extract_llama_action(output: str) -> str | None:
         "move_randomly",
     ]
 
-    # exact match
-    if text in allowed_actions:
-        return text
-
-    # quoted exact match
-    for action in allowed_actions:
-        if f'"{action}"' in text:
-            return action
-        if f"'{action}'" in text:
-            return action
-
-    # plain substring fallback
-    lower = text.lower()
-    for action in allowed_actions:
-        if action.lower() in lower:
-            return action
-
-    return None
+    return text if text in allowed_actions else None
 
 
-def wrap_action_as_pacman_agent(action: str) -> str:
+def wrap_action_as_pacman_agent(default_action: str,
+                                ghost_action: str ) -> str:
     return f'''def pacman_agent(state):
-    return "{action}"
+    if state.isGhostNearby():
+        return "{ghost_action}"
+    return "{default_action}"
 '''
 
 class HeuristicLLMMutator:
@@ -522,25 +510,33 @@ Answer with one word only:
         text = str(data.get("content", "")).strip()
         print(f"[LLM DEBUG] Raw llama-server action output: {text}")
 
-        action = extract_llama_action(text)
-
-        if action is None:
-            return MutationOutput(
-                code=code,
-                summary="llama-server returned no valid action; original code preserved.",
-                expected_improvement="",
-                provider=self.provider,
-            )
-        
         #epsilon-greedy exploration
         exploration_used = False
         epsilon = 0.2
+
         if random.random() < epsilon:
-            action = random.choice(["eat_food", "run_away", "wait", "move_randomly"])
+            action = random.choice(VALID_ACTIONS)
             exploration_used = True
             print(f"[LLM DEBUG] Epsilon exploration triggered, sampled action: {action}")
+        else:
+            #try LLM output
+            action = extract_llama_action(text)
 
-        mutated = wrap_action_as_pacman_agent(action)
+            #fallback
+            if action is None:
+                action = random.choice(VALID_ACTIONS)
+                exploration_used = True
+                print(f"[LLM DEBUG] Invalid LLM -> fallback action: {action}")
+
+        #new ghost branch mutation
+        if random.random() < 0.3:
+            ghost_action = random.choice(["run_away", "wait"])
+        else:
+            ghost_action = "run_away"
+        
+        print(f"[LLM DEBUG] Selected ghost_action: {ghost_action}")
+
+        mutated = wrap_action_as_pacman_agent(action, ghost_action)
         print("[LLM DEBUG] Original code passed into mutate_action:")
         print(code)
         print("[LLM DEBUG] Wrapped mutated code:")
@@ -550,6 +546,15 @@ Answer with one word only:
             return MutationOutput(
                 code=code,
                 summary="llama-server returned unchanged action; original code preserved.",
+                expected_improvement="",
+                provider=self.provider,
+            )
+        
+        if not is_valid_pacman_agent(mutated) or not has_valid_pacman_actions(mutated):
+            print("[LLM DEBUG] Invalid generated agent, reverting to original")
+            return MutationOutput(
+                code=code,
+                summary="Invalid generated agent; original preserved.",
                 expected_improvement="",
                 provider=self.provider,
             )

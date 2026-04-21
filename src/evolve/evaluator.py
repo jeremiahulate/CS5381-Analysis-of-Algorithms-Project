@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import hashlib
 from dataclasses import dataclass
 from typing import Protocol
@@ -25,12 +26,23 @@ class Evaluator(Protocol):
     def evaluate(self, candidate: CandidateProgram) -> EvaluationMetrics:
         ...
 
-def extract_action_from_code(code: str) -> str | None:
-    actions = ["eat_food", "run_away", "wait", "move_randomly"]
-    for action in actions:
-        if f'return "{action}"' in code or f"return '{action}'" in code:
-            return action
-    return None
+def extract_branch_actions(code: str) -> tuple[str | None, str | None]:
+    ghost_action = None
+    default_action = None
+
+    ghost_match = re.search(
+        r'if\s+state\.isGhostNearby\(\):\s*return\s*["\'](eat_food|run_away|wait|move_randomly)["\']',
+        code,
+        re.DOTALL,
+    )
+    if ghost_match:
+        ghost_action = ghost_match.group(1)
+
+    returns = re.findall(r'return\s*["\'](eat_food|run_away|wait|move_randomly)["\']', code)
+    if returns:
+        default_action = returns[-1]
+
+    return ghost_action, default_action
 
 class DeterministicStubPacmanEvaluator:
     """
@@ -62,7 +74,7 @@ class DeterministicStubPacmanEvaluator:
 
         lowered = code.lower()
 
-        action = extract_action_from_code(code)
+        ghost_action, default_action = extract_branch_actions(code)
 
         # Structural signals
         if_count = lowered.count("if ")
@@ -78,22 +90,28 @@ class DeterministicStubPacmanEvaluator:
         action_survival_bonus = 0.0
         action_step_adjustment = 0
 
-        if action == "eat_food":
+        if default_action == "eat_food":
             action_score_bonus = 60
             action_survival_bonus = 2.0
             action_step_adjustment = -8
-        elif action == "run_away":
+        elif default_action == "run_away":
             action_score_bonus = 40
             action_survival_bonus = 4.0
             action_step_adjustment = -5
-        elif action == "wait":
+        elif default_action == "wait":
             action_score_bonus = 10
             action_survival_bonus = 1.0
             action_step_adjustment = 0
-        elif action == "move_randomly":
+        elif default_action == "move_randomly":
             action_score_bonus = 5
             action_survival_bonus = 0.5
             action_step_adjustment = 5
+        if ghost_action == "run_away":
+            action_score_bonus += 25
+            action_survival_bonus += 2.5
+        elif ghost_action == "wait":
+            action_score_bonus -= 10
+            action_survival_bonus -= 0.5
         # Deterministic content hash
         digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
         hash_value = int(digest[:8], 16)
@@ -150,7 +168,7 @@ class DeterministicStubPacmanEvaluator:
         steps = float(max(1, steps))
 
         #EVAL DEBUG
-        print(f"[EVAL DEBUG] action={action}, score={score}, survival={survival_time}, steps={steps}")
+        print(f"[EVAL DEBUG] default_action={default_action}, score={score}, survival={survival_time}, steps={steps}")
 
         return EvaluationMetrics(
             score=score,
