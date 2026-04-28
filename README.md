@@ -300,7 +300,7 @@ Models/
 └── llama/
     ├── llama-server.exe
     └── models/
-        └── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+        └── mistral-7b-instruct-v0.2.Q4_K_M.gguf
 ```
 ---
 
@@ -308,7 +308,7 @@ Models/
 
 Open PowerShell in the project root and run:
 ```text
-.\Models\llama\llama-server.exe -m .\Models\llama\models\tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+.\Models\llama\llama-server.exe -m .\Models\llama\models\mistral-7b-instruct-v0.2.Q4_K_M.gguf
 --host 127.0.0.1 `
 --port 8080
 ```
